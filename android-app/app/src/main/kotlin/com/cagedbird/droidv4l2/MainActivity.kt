@@ -35,37 +35,54 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         
-        // Setup Spinners
+        val editIp = findViewById<EditText>(R.id.editIp)
+        val editBitrate = findViewById<EditText>(R.id.editBitrate)
         val spinnerRes = findViewById<Spinner>(R.id.spinnerRes)
+        val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
+
+        // 初始化 UI 默认值
         val resOptions = arrayOf("720p", "1080p", "480p")
         spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
         spinnerRes.setSelection(resOptions.indexOf(prefs.getString("res", "720p")))
 
-        val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
         val fpsOptions = arrayOf("30", "60")
         spinnerFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsOptions)
         spinnerFps.setSelection(fpsOptions.indexOf(prefs.getString("fps", "30")))
 
-        findViewById<Button>(R.id.btnApply).setOnClickListener {
-            val ip = findViewById<EditText>(R.id.editIp).text.toString()
-            val bitrate = findViewById<EditText>(R.id.editBitrate).text.toString().toIntOrNull() ?: 10
-            val res = spinnerRes.selectedItem.toString()
-            val fps = spinnerFps.selectedItem.toString()
+        editIp.setText(prefs.getString("ip", "10.0.0.17"))
+        editBitrate.setText(prefs.getInt("bitrate", 10).toString())
 
-            prefs.edit().putString("ip", ip)
-                .putInt("bitrate", bitrate)
-                .putString("res", res)
-                .putString("fps", fps)
+        findViewById<Button>(R.id.btnApply).setOnClickListener {
+            prefs.edit().putString("ip", editIp.text.toString())
+                .putInt("bitrate", editBitrate.text.toString().toIntOrNull() ?: 10)
+                .putString("res", spinnerRes.selectedItem.toString())
+                .putString("fps", spinnerFps.selectedItem.toString())
                 .apply()
             
+            Log.i(TAG, "[UI] Applying new settings and restarting stream")
             startStreaming()
         }
+        
+        // 注意：onCreate 里不再直接启动，全部交给 onResume 处理
+    }
 
-        if (allPermissionsGranted()) startStreaming() else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
+    override fun onResume() {
+        super.onResume()
+        if (allPermissionsGranted()) {
+            startStreaming()
+        } else {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopStreaming()
     }
 
     private fun startStreaming() {
         stopStreaming()
+        
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val host = prefs.getString("ip", "10.0.0.17")!!
         val bitrate = prefs.getInt("bitrate", 10)
@@ -78,10 +95,10 @@ class MainActivity : AppCompatActivity() {
             else -> 1280 to 720
         }
 
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Connecting..."
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing..."
 
         srtSender = SrtSender(host, 5000) {
-            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED (${resStr}@${fps})" }
+            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED" }
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
@@ -117,14 +134,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopStreaming() {
+        Log.d(TAG, "[CLEANUP] Stopping streaming components")
         srtSender?.stop()
         videoEncoder?.stop()
         srtSender = null
         videoEncoder = null
     }
 
-    override fun onResume() { super.onResume(); if (allPermissionsGranted()) startStreaming() }
-    override fun onPause() { super.onPause(); stopStreaming() }
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     override fun onDestroy() { super.onDestroy(); cameraExecutor.shutdown() }
 }
