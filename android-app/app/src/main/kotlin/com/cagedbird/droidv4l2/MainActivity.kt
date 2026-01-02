@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (allPermissionsGranted()) {
-            startEverything()
+            startStreaming()
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
@@ -56,25 +56,23 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        stopEverything()
+        stopStreaming()
     }
 
-    private fun startEverything() {
-        Log.d(TAG, "Starting services...")
+    private fun startStreaming() {
+        Log.d(TAG, "Initializing components...")
         
-        // 1. 初始化发送端，连接成功后请求关键帧
         srtSender = SrtSender(targetHost, targetPort) {
+            // 连接成功后，强制编码器刷新一个关键帧，让 Linux 端的解码器立刻“复活”
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        // 2. 初始化编码器
         videoEncoder = VideoEncoder(1280, 720, 2_000_000, 30) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
         
-        // 3. 绑定相机
         bindCamera()
     }
 
@@ -114,15 +112,20 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun stopEverything() {
-        Log.d(TAG, "Stopping services...")
-        videoEncoder?.stop()
+    private fun stopStreaming() {
+        Log.d(TAG, "Stopping components...")
         srtSender?.stop()
-        videoEncoder = null
+        videoEncoder?.stop()
         srtSender = null
+        videoEncoder = null
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 10 && allPermissionsGranted()) startStreaming()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
