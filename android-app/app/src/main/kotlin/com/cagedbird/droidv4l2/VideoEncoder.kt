@@ -26,10 +26,10 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2) // 2 seconds normal interval
-            setInteger(MediaFormat.KEY_LATENCY, 0)
-            setInteger(MediaFormat.KEY_PRIORITY, 0)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second between I-frames
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1_000_000 / frameRate)
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
         }
 
         mediaCodec = MediaCodec.createEncoderByType(mimeType).apply {
