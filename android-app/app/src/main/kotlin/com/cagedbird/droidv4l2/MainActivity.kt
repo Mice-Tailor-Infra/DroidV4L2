@@ -1,12 +1,14 @@
 package com.cagedbird.droidv4l2
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
-import android.view.ViewGroup
-import android.widget.FrameLayout
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
@@ -26,39 +28,60 @@ class MainActivity : AppCompatActivity() {
     private var videoEncoder: VideoEncoder? = null
     private var srtSender: SrtSender? = null
 
-    private val targetHost = "10.0.0.17" 
-    private val targetPort = 5000
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val container = FrameLayout(this)
-        viewFinder = PreviewView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        }
-        container.addView(viewFinder)
-        setContentView(container)
-        cameraExecutor = Executors.newSingleThreadExecutor()
-    }
+        setContentView(R.layout.activity_main)
 
-    override fun onResume() {
-        super.onResume()
+        viewFinder = findViewById(R.id.viewFinder)
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val editIp = findViewById<EditText>(R.id.editIp)
+        val editBitrate = findViewById<EditText>(R.id.editBitrate)
+        val btnApply = findViewById<Button>(R.id.btnApply)
+
+        editIp.setText(prefs.getString("ip", "10.0.0.17"))
+        editBitrate.setText(prefs.getInt("bitrate", 10).toString())
+
+        btnApply.setOnClickListener {
+            val ip = editIp.text.toString()
+            val bitrate = editBitrate.text.toString().toIntOrNull() ?: 10
+            
+            prefs.edit().putString("ip", ip).putInt("bitrate", bitrate).apply()
+            
+            Log.i(TAG, "Settings updated: $ip, ${bitrate}Mbps")
+            startEverything()
+        }
+
         if (allPermissionsGranted()) {
-            startHeartbeat()
+            startEverything()
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
     }
 
-    override fun onPause() {
-        super.onPause()
+    private fun startEverything() {
         stopEverything()
-    }
+        
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val host = prefs.getString("ip", "10.0.0.17")!!
+        val bitrateMbps = prefs.getInt("bitrate", 10)
+        
+        val statusText = findViewById<TextView>(R.id.txtStatus)
+        statusText.text = "Status: Connecting to $host..."
 
-    private fun startHeartbeat() {
-        srtSender = SrtSender(targetHost, targetPort) {
+        srtSender = SrtSender(host, 5000) {
+            runOnUiThread { statusText.text = "Status: CONNECTED" }
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
+        
+        // 编码分辨率暂定 720p，后续可以加 Spinner 选择
+        videoEncoder = VideoEncoder(1280, 720, bitrateMbps * 1_000_000, 30) { data, ts, flags ->
+            srtSender?.send(data, ts, flags)
+        }
+        videoEncoder?.start()
+        
         bindCamera()
     }
 
@@ -73,15 +96,10 @@ class MainActivity : AppCompatActivity() {
             val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
             val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
             
-            encoderPreview.setSurfaceProvider { request ->
-                val res = request.resolution
-                videoEncoder?.stop()
-                // 码率提高到 10Mbps 以利用 Wi-Fi 6 优势
-                videoEncoder = VideoEncoder(res.width, res.height, 10_000_000, 30) { data, ts, flags ->
-                    srtSender?.send(data, ts, flags)
+            videoEncoder?.getInputSurface()?.let { surface ->
+                encoderPreview.setSurfaceProvider { request ->
+                    request.provideSurface(surface, cameraExecutor) { }
                 }
-                videoEncoder?.start()
-                videoEncoder?.getInputSurface()?.let { surface -> request.provideSurface(surface, cameraExecutor) { } }
             }
 
             try {
@@ -98,6 +116,16 @@ class MainActivity : AppCompatActivity() {
         videoEncoder?.stop()
         srtSender = null
         videoEncoder = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (allPermissionsGranted()) startEverything()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopEverything()
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
