@@ -33,9 +33,6 @@ class SrtSender(
         isConnecting = true
         val url = "srt://$host:$port/live"
         Log.d(TAG, "[NETWORK] Heartbeat: Trying to connect to $url")
-        
-        // 确保清理掉之前的残留状态
-        srtClient.disconnect()
         srtClient.connect(url)
     }
 
@@ -92,7 +89,7 @@ class SrtSender(
     }
     
     override fun onConnectionFailed(reason: String) {
-        Log.w(TAG, "[NETWORK] Connection failed: $reason. Retrying...")
+        Log.e(TAG, "[NETWORK] Connection failed: $reason")
         isConnecting = false
         if (!isStopped) {
             handler.postDelayed({ connectInternal() }, 2000)
@@ -104,7 +101,7 @@ class SrtSender(
         Log.w(TAG, "[NETWORK] SRT DISCONNECTED")
         isConnecting = false
         if (!isStopped) {
-            handler.postDelayed({ connectInternal() }, 1000)
+            handler.postDelayed({ connectInternal() }, 2000)
         }
     }
     override fun onAuthError() {}

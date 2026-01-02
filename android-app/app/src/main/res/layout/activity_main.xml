@@ -9,69 +9,71 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 设置面板 -->
     <LinearLayout
-        android:layout_width="280dp"
+        android:layout_width="300dp"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|start"
         android:layout_margin="16dp"
-        android:background="#80000000"
+        android:background="#A0000000"
         android:orientation="vertical"
         android:padding="16dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="DroidV4L2 Settings"
-            android:textColor="#FFF"
+            android:text="DroidV4L2 Moonlight Panel"
+            android:textColor="#00FF00"
             android:textStyle="bold" />
 
         <EditText
             android:id="@+id/editIp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Target IP (e.g. 10.0.0.17)"
-            android:inputType="textUri"
+            android:hint="Target IP"
             android:text="10.0.0.17"
             android:textColor="#FFF"
-            android:textColorHint="#AAA" />
+            android:textColorHint="#888" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Bitrate (Mbps)" android:textColor="#FFF"/>
+            <EditText android:id="@+id/editBitrate" android:layout_width="60dp" android:layout_height="wrap_content" android:text="10" android:textColor="#FFF" android:inputType="number"/>
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="8dp">
-            
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Bitrate (Mbps): "
-                android:textColor="#FFF" />
+            android:layout_marginTop="4dp">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Resolution" android:textColor="#FFF"/>
+            <Spinner android:id="@+id/spinnerRes" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
+        </LinearLayout>
 
-            <EditText
-                android:id="@+id/editBitrate"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:text="10"
-                android:textColor="#FFF" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="FPS" android:textColor="#FFF"/>
+            <Spinner android:id="@+id/spinnerFps" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
         </LinearLayout>
 
         <Button
             android:id="@+id/btnApply"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Apply &amp; Reconnect" />
+            android:layout_marginTop="12dp"
+            android:text="Apply Settings" />
 
         <TextView
             android:id="@+id/txtStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Status: Disconnected"
-            android:textColor="#0F0"
-            android:textSize="12sp" />
+            android:text="Status: Idle"
+            android:textColor="#00FF00"
+            android:textSize="11sp" />
     </LinearLayout>
-
 </FrameLayout>

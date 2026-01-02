@@ -6,9 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
@@ -36,102 +34,97 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val editIp = findViewById<EditText>(R.id.editIp)
-        val editBitrate = findViewById<EditText>(R.id.editBitrate)
-        val btnApply = findViewById<Button>(R.id.btnApply)
+        
+        // Setup Spinners
+        val spinnerRes = findViewById<Spinner>(R.id.spinnerRes)
+        val resOptions = arrayOf("720p", "1080p", "480p")
+        spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
+        spinnerRes.setSelection(resOptions.indexOf(prefs.getString("res", "720p")))
 
-        editIp.setText(prefs.getString("ip", "10.0.0.17"))
-        editBitrate.setText(prefs.getInt("bitrate", 10).toString())
+        val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
+        val fpsOptions = arrayOf("30", "60")
+        spinnerFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsOptions)
+        spinnerFps.setSelection(fpsOptions.indexOf(prefs.getString("fps", "30")))
 
-        btnApply.setOnClickListener {
-            val ip = editIp.text.toString()
-            val bitrate = editBitrate.text.toString().toIntOrNull() ?: 10
+        findViewById<Button>(R.id.btnApply).setOnClickListener {
+            val ip = findViewById<EditText>(R.id.editIp).text.toString()
+            val bitrate = findViewById<EditText>(R.id.editBitrate).text.toString().toIntOrNull() ?: 10
+            val res = spinnerRes.selectedItem.toString()
+            val fps = spinnerFps.selectedItem.toString()
+
+            prefs.edit().putString("ip", ip)
+                .putInt("bitrate", bitrate)
+                .putString("res", res)
+                .putString("fps", fps)
+                .apply()
             
-            prefs.edit().putString("ip", ip).putInt("bitrate", bitrate).apply()
-            
-            Log.i(TAG, "Settings updated: $ip, ${bitrate}Mbps")
-            startEverything()
+            startStreaming()
         }
 
-        if (allPermissionsGranted()) {
-            startEverything()
-        } else {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
-        }
+        if (allPermissionsGranted()) startStreaming() else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
     }
 
-    private fun startEverything() {
-        stopEverything()
-        
+    private fun startStreaming() {
+        stopStreaming()
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val host = prefs.getString("ip", "10.0.0.17")!!
-        val bitrateMbps = prefs.getInt("bitrate", 10)
-        
-        val statusText = findViewById<TextView>(R.id.txtStatus)
-        statusText.text = "Status: Connecting to $host..."
+        val bitrate = prefs.getInt("bitrate", 10)
+        val resStr = prefs.getString("res", "720p")
+        val fps = prefs.getString("fps", "30")?.toInt() ?: 30
+
+        val (w, h) = when(resStr) {
+            "1080p" -> 1920 to 1080
+            "480p" -> 640 to 480
+            else -> 1280 to 720
+        }
+
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Connecting..."
 
         srtSender = SrtSender(host, 5000) {
-            runOnUiThread { statusText.text = "Status: CONNECTED" }
+            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED (${resStr}@${fps})" }
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        // 编码分辨率暂定 720p，后续可以加 Spinner 选择
-        videoEncoder = VideoEncoder(1280, 720, bitrateMbps * 1_000_000, 30) { data, ts, flags ->
+        videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
         
-        bindCamera()
+        bindCamera(w, h)
     }
 
-    private fun bindCamera() {
+    private fun bindCamera(width: Int, height: Int) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+            val cameraProvider = cameraProviderFuture.get()
             val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                .setResolutionStrategy(ResolutionStrategy(Size(width, height), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build()
 
             val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
             val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
             
-            videoEncoder?.getInputSurface()?.let { surface ->
-                encoderPreview.setSurfaceProvider { request ->
-                    request.provideSurface(surface, cameraExecutor) { }
-                }
+            encoderPreview.setSurfaceProvider { request ->
+                videoEncoder?.getInputSurface()?.let { request.provideSurface(it, cameraExecutor) { } }
             }
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
-            } catch (exc: Exception) {
-                Log.e(TAG, "Bind failed", exc)
-            }
+            } catch (e: Exception) { Log.e(TAG, "Bind failed", e) }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun stopEverything() {
+    private fun stopStreaming() {
         srtSender?.stop()
         videoEncoder?.stop()
         srtSender = null
         videoEncoder = null
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (allPermissionsGranted()) startEverything()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        stopEverything()
-    }
-
+    override fun onResume() { super.onResume(); if (allPermissionsGranted()) startStreaming() }
+    override fun onPause() { super.onPause(); stopStreaming() }
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-    override fun onDestroy() {
-        super.onDestroy()
-        cameraExecutor.shutdown()
-    }
+    override fun onDestroy() { super.onDestroy(); cameraExecutor.shutdown() }
 }
