@@ -17,6 +17,7 @@ class SrtSender(
     private val srtClient = SrtClient(this)
     private val handler = Handler(Looper.getMainLooper())
     private var isStopped = false
+    private var isConnecting = false
     
     private var cachedSps: ByteArray? = null
     private var cachedPps: ByteArray? = null
@@ -27,9 +28,14 @@ class SrtSender(
     }
 
     private fun connectInternal() {
-        if (isStopped || srtClient.isStreaming) return
+        if (isStopped || srtClient.isStreaming || isConnecting) return
+        
+        isConnecting = true
         val url = "srt://$host:$port/live"
         Log.d(TAG, "[NETWORK] Heartbeat: Trying to connect to $url")
+        
+        // 确保清理掉之前的残留状态
+        srtClient.disconnect()
         srtClient.connect(url)
     }
 
@@ -72,19 +78,22 @@ class SrtSender(
 
     fun stop() {
         isStopped = true
+        isConnecting = false
         handler.removeCallbacksAndMessages(null)
         srtClient.disconnect()
     }
 
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
-        Log.i(TAG, "[NETWORK] SRT Handshake Success!")
+        Log.i(TAG, "[NETWORK] SRT CONNECTED")
+        isConnecting = false
         sendConfigPackets()
         onConnected()
     }
     
     override fun onConnectionFailed(reason: String) {
-        Log.w(TAG, "[NETWORK] Connection failed ($reason). Retrying in 2s...")
+        Log.w(TAG, "[NETWORK] Connection failed: $reason. Retrying...")
+        isConnecting = false
         if (!isStopped) {
             handler.postDelayed({ connectInternal() }, 2000)
         }
@@ -92,7 +101,8 @@ class SrtSender(
     
     override fun onNewBitrate(bitrate: Long) {}
     override fun onDisconnect() {
-        Log.w(TAG, "[NETWORK] Disconnected. Re-polling...")
+        Log.w(TAG, "[NETWORK] SRT DISCONNECTED")
+        isConnecting = false
         if (!isStopped) {
             handler.postDelayed({ connectInternal() }, 1000)
         }

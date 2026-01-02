@@ -27,8 +27,6 @@ fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("GStreamer init failed")?;
 
-    // --- 1. 建立持久输出管线 ---
-    // 使用 I420 作为桥接格式，它是 H.264 解码的原始输出，能减少一次转换开销
     let sink_pipeline_str = format!(
         "appsrc name=mysrc is-live=true format=time min-latency=0 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={} sync=false",
         args.device
@@ -49,14 +47,12 @@ fn main() -> Result<()> {
         timestamp_ns: 0,
     }));
 
-    // --- 2. 启动 Watchdog 线程 (保活专用) ---
-    // 只有在 100ms 没收到新帧时，才重复发送最后一帧
     let state_watchdog = Arc::clone(&state);
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(33));
             let mut s = state_watchdog.lock().unwrap();
-            if s.last_update.elapsed() > Duration::from_millis(100) {
+            if s.last_update.elapsed() > Duration::from_millis(200) {
                 if let Some(sample) = s.last_sample.clone() {
                     push_sample_to_appsrc(&mut s, sample);
                 }
@@ -64,12 +60,11 @@ fn main() -> Result<()> {
         }
     });
 
-    // --- 3. 动态拉流 Source 循环 ---
     loop {
         println!("[NETWORK] Waiting for Android stream on port {}...", args.port);
-        // 增加解码器线程数，开启低延迟属性
+        // poll-timeout 改为 2000，增加握手成功率
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=2000 ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
             args.port
         );
 
@@ -86,7 +81,6 @@ fn main() -> Result<()> {
                         let mut s = state_input.lock().unwrap();
                         s.last_sample = Some(sample.clone());
                         s.last_update = Instant::now();
-                        // 收到立刻注入，实现零等待转发
                         push_sample_to_appsrc(&mut s, sample);
                         Ok(gst::FlowSuccess::Ok)
                     })
@@ -108,7 +102,6 @@ fn main() -> Result<()> {
     }
 }
 
-// 辅助函数：将 Sample 注入 appsrc 并对齐 Caps
 fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample) {
     if let Some(caps) = sample.caps() {
         s.appsrc.set_caps(Some(&caps.to_owned()));
