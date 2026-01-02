@@ -27,8 +27,10 @@ fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("GStreamer init failed")?;
 
+    // --- 1. 持久 Sink 管线 ---
+    // 强制输出 1080p
     let sink_pipeline_str = format!(
-        "appsrc name=mysrc is-live=true format=time min-latency=0 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={} sync=false",
+        "appsrc name=mysrc is-live=true format=time min-latency=0 ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080 ! v4l2sink device={} sync=false",
         args.device
     );
     let sink_pipeline = gst::parse_launch(&sink_pipeline_str)?;
@@ -47,6 +49,7 @@ fn main() -> Result<()> {
         timestamp_ns: 0,
     }));
 
+    // --- 2. Watchdog 线程 (保活) ---
     let state_watchdog = Arc::clone(&state);
     thread::spawn(move || {
         loop {
@@ -60,11 +63,13 @@ fn main() -> Result<()> {
         }
     });
 
+    // --- 3. 动态 Source 循环 (带敏捷重启) ---
     loop {
-        println!("[NETWORK] Waiting for Android stream on port {}...", args.port);
-        // 移除 poll-timeout，让它永远监听，防止端口反复开关
+        println!("[NETWORK] Listener opening on port {}...", args.port);
+        // 关键修改：poll-timeout=100
+        // 只要 100ms 没连上或断开，立刻重启管线。这能确保每次新连接都有全新的解码器。
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=100 ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
             args.port
         );
 
@@ -89,6 +94,8 @@ fn main() -> Result<()> {
 
             src_pipe.set_state(gst::State::Playing).unwrap();
             let bus = src_pipe.bus().unwrap();
+            
+            // 只要报错或断开，立刻退出循环重启
             for msg in bus.iter_timed(gst::ClockTime::NONE) {
                 use gst::MessageView;
                 match msg.view() {
@@ -98,7 +105,8 @@ fn main() -> Result<()> {
             }
             src_pipe.set_state(gst::State::Null).unwrap();
         }
-        thread::sleep(Duration::from_millis(500));
+        // 重启极快，几乎没有冷却
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

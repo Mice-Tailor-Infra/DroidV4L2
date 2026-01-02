@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Size
 import android.widget.*
@@ -25,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private var viewFinder: PreviewView? = null
     private var videoEncoder: VideoEncoder? = null
     private var srtSender: SrtSender? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,13 +37,11 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-        
         val editIp = findViewById<EditText>(R.id.editIp)
         val editBitrate = findViewById<EditText>(R.id.editBitrate)
         val spinnerRes = findViewById<Spinner>(R.id.spinnerRes)
         val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
 
-        // 初始化 UI 默认值
         val resOptions = arrayOf("720p", "1080p", "480p")
         spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
         spinnerRes.setSelection(resOptions.indexOf(prefs.getString("res", "720p")))
@@ -59,8 +60,8 @@ class MainActivity : AppCompatActivity() {
                 .putString("fps", spinnerFps.selectedItem.toString())
                 .apply()
             
-            Log.i(TAG, "[UI] Applying new settings and restarting stream")
-            startStreaming()
+            Log.i(TAG, "[UI] Applying settings...")
+            restartStreamingWithDelay()
         }
     }
 
@@ -78,9 +79,19 @@ class MainActivity : AppCompatActivity() {
         stopStreaming()
     }
 
-    private fun startStreaming() {
+    private fun restartStreamingWithDelay() {
         stopStreaming()
-        
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (0.5s)..."
+        // 战术延迟 500ms，等待 Linux 端 poll-timeout (100ms) 触发并完成重启
+        mainHandler.postDelayed({
+            startStreaming()
+        }, 500)
+    }
+
+    private fun startStreaming() {
+        // 防止重复调用
+        if (srtSender != null) return
+
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val host = prefs.getString("ip", "10.0.0.17")!!
         val bitrate = prefs.getInt("bitrate", 10)
@@ -95,16 +106,13 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing..."
 
-        // 关键修复：先初始化 Encoder，确保对象存在
         videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
 
-        // 再启动 Network，这样 onConnected 回调时 encoder 已经就绪
         srtSender = SrtSender(host, 5000) {
             runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED" }
-            Log.i(TAG, "[SYSTEM] Connection established. Requesting IDR frame...")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
@@ -135,7 +143,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopStreaming() {
-        Log.d(TAG, "[CLEANUP] Stopping streaming components")
+        mainHandler.removeCallbacksAndMessages(null) // 清理之前的延迟任务
         srtSender?.stop()
         videoEncoder?.stop()
         srtSender = null
