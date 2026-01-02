@@ -6,7 +6,11 @@ import com.pedro.common.ConnectChecker
 import com.pedro.srt.srt.SrtClient
 import java.nio.ByteBuffer
 
-class SrtSender(private val host: String, private val port: Int) : ConnectChecker {
+class SrtSender(
+    private val host: String, 
+    private val port: Int,
+    private val onConnected: () -> Unit // 回调通知连接成功
+) : ConnectChecker {
     private val TAG = "SrtSender"
     private val srtClient = SrtClient(this)
     
@@ -58,8 +62,6 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
     private fun sendConfigPackets() {
         val sps = cachedSps ?: return
         val pps = cachedPps ?: return
-        
-        Log.i(TAG, "Force sync SPS/PPS")
         srtClient.setVideoInfo(ByteBuffer.wrap(sps), ByteBuffer.wrap(pps), null)
         
         val dummyInfo = MediaCodec.BufferInfo().apply {
@@ -80,8 +82,9 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
 
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
-        Log.i(TAG, "RECONNECTED - Syncing...")
+        Log.i(TAG, "SRT_CONNECTED")
         sendConfigPackets()
+        onConnected() // 触发 UI 层的刷新逻辑
     }
     override fun onConnectionFailed(reason: String) {}
     override fun onNewBitrate(bitrate: Long) {}

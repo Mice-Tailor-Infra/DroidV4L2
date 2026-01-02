@@ -3,6 +3,7 @@ package com.cagedbird.droidv4l2
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.os.Bundle
 import android.util.Log
 import android.view.Surface
 import java.util.concurrent.ExecutorService
@@ -24,44 +25,45 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second for GOP
-            
-            // --- 低延迟核心配置 ---
-            // 提示编码器尽快输出，不要缓存
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2) // 2 seconds normal interval
             setInteger(MediaFormat.KEY_LATENCY, 0)
-            // 实时优先级
             setInteger(MediaFormat.KEY_PRIORITY, 0)
-            // 使用 CBR 模式减少码率波动导致的缓冲
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         }
 
         mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
             setCallback(object : MediaCodec.Callback() {
                 override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {}
-
                 override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
                     val outputBuffer = codec.getOutputBuffer(index)
                     if (outputBuffer != null && info.size > 0) {
                         outputBuffer.position(info.offset)
                         outputBuffer.limit(info.offset + info.size)
-                        
                         val data = ByteArray(info.size)
                         outputBuffer.get(data)
                         onEncodedData(data, info.presentationTimeUs, info.flags)
-                        
                         codec.releaseOutputBuffer(index, false)
                     }
                 }
-
                 override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) { e.printStackTrace() }
-                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-                    Log.d("VideoEncoder", "Format changed: $format")
-                }
+                override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {}
             })
-
             configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             inputSurface = createInputSurface()
             start()
+        }
+    }
+
+    // 关键功能：强制产生一个 IDR 帧
+    fun requestKeyFrame() {
+        val params = Bundle().apply {
+            putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+        }
+        try {
+            mediaCodec?.setParameters(params)
+            Log.i("VideoEncoder", "IDR Frame Requested")
+        } catch (e: Exception) {
+            Log.e("VideoEncoder", "Failed to request IDR frame", e)
         }
     }
 
@@ -75,6 +77,5 @@ class VideoEncoder(
         mediaCodec = null
         inputSurface?.release()
         inputSurface = null
-        encoderExecutor.shutdown()
     }
 }

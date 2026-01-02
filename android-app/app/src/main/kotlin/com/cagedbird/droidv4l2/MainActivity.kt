@@ -43,7 +43,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(container)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+    }
 
+    override fun onResume() {
+        super.onResume()
         if (allPermissionsGranted()) {
             startEverything()
         } else {
@@ -51,33 +54,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startEverything() {
-        // 固定分辨率，减少变化
-        val width = 1280
-        val height = 720
-        
-        Log.d(TAG, "Starting: ${width}x${height}")
+    override fun onPause() {
+        super.onPause()
+        stopEverything()
+    }
 
-        srtSender = SrtSender(targetHost, targetPort)
+    private fun startEverything() {
+        Log.d(TAG, "Starting services...")
+        
+        // 1. 初始化发送端，连接成功后请求关键帧
+        srtSender = SrtSender(targetHost, targetPort) {
+            videoEncoder?.requestKeyFrame()
+        }
         srtSender?.start()
         
-        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
+        // 2. 初始化编码器
+        videoEncoder = VideoEncoder(1280, 720, 2_000_000, 30) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
         
-        bindCamera(width, height)
+        // 3. 绑定相机
+        bindCamera()
     }
 
-    private fun bindCamera(width: Int, height: Int) {
+    private fun bindCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             
-            // 使用 ResolutionSelector 更加稳健
             val resSelector = ResolutionSelector.Builder()
                 .setResolutionStrategy(ResolutionStrategy(
-                    Size(width, height), 
+                    Size(1280, 720), 
                     ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                 ))
                 .build()
@@ -93,37 +101,31 @@ class MainActivity : AppCompatActivity() {
             
             videoEncoder?.getInputSurface()?.let { surface ->
                 encoderPreview.setSurfaceProvider { request ->
-                    Log.d(TAG, "Encoder surface linked")
                     request.provideSurface(surface, cameraExecutor) { }
                 }
             }
 
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this, 
-                    CameraSelector.DEFAULT_BACK_CAMERA, 
-                    preview, 
-                    encoderPreview
-                )
-                Log.d(TAG, "Bind success")
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
             } catch (exc: Exception) {
-                Log.e(TAG, "Bind failed: ${exc.message}")
+                Log.e(TAG, "Camera bind failed", exc)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 10 && allPermissionsGranted()) startEverything()
+    private fun stopEverything() {
+        Log.d(TAG, "Stopping services...")
+        videoEncoder?.stop()
+        srtSender?.stop()
+        videoEncoder = null
+        srtSender = null
     }
+
+    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     override fun onDestroy() {
         super.onDestroy()
-        videoEncoder?.stop()
-        srtSender?.stop()
         cameraExecutor.shutdown()
     }
 }
