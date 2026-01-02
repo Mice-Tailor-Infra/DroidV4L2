@@ -15,7 +15,7 @@ class SrtSender(
 ) : ConnectChecker {
     private val TAG = "SrtSender"
     private val srtClient = SrtClient(this)
-    private val retryHandler = Handler(Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
     private var isStopped = false
     
     private var cachedSps: ByteArray? = null
@@ -29,7 +29,7 @@ class SrtSender(
     private fun connectInternal() {
         if (isStopped || srtClient.isStreaming) return
         val url = "srt://$host:$port/live"
-        Log.d(TAG, "Attempting SRT Connect: $url")
+        Log.d(TAG, "[NETWORK] Heartbeat: Trying to connect to $url")
         srtClient.connect(url)
     }
 
@@ -67,32 +67,35 @@ class SrtSender(
     private fun sendConfigPackets() {
         val sps = cachedSps ?: return
         val pps = cachedPps ?: return
-        Log.i(TAG, "Syncing SPS/PPS to new connection")
         srtClient.setVideoInfo(ByteBuffer.wrap(sps), ByteBuffer.wrap(pps), null)
     }
 
     fun stop() {
         isStopped = true
-        retryHandler.removeCallbacksAndMessages(null)
+        handler.removeCallbacksAndMessages(null)
         srtClient.disconnect()
     }
 
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
-        Log.i(TAG, "CONNECTED SUCCESS")
+        Log.i(TAG, "[NETWORK] SRT Handshake Success!")
         sendConfigPackets()
         onConnected()
     }
     
     override fun onConnectionFailed(reason: String) {
-        Log.e(TAG, "CONNECTION FAILED: $reason. Retrying...")
-        if (!isStopped) retryHandler.postDelayed({ connectInternal() }, 2000)
+        Log.w(TAG, "[NETWORK] Connection failed ($reason). Retrying in 2s...")
+        if (!isStopped) {
+            handler.postDelayed({ connectInternal() }, 2000)
+        }
     }
     
     override fun onNewBitrate(bitrate: Long) {}
     override fun onDisconnect() {
-        Log.w(TAG, "DISCONNECTED. Retrying...")
-        if (!isStopped) retryHandler.postDelayed({ connectInternal() }, 2000)
+        Log.w(TAG, "[NETWORK] Disconnected. Re-polling...")
+        if (!isStopped) {
+            handler.postDelayed({ connectInternal() }, 1000)
+        }
     }
     override fun onAuthError() {}
     override fun onAuthSuccess() {}

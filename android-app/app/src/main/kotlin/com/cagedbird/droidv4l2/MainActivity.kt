@@ -8,7 +8,6 @@ import android.util.Size
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -44,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (allPermissionsGranted()) {
-            startEverything()
+            startHeartbeat()
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
@@ -55,14 +54,16 @@ class MainActivity : AppCompatActivity() {
         stopEverything()
     }
 
-    private fun startEverything() {
-        // 先建立网络连接
+    private fun startHeartbeat() {
+        Log.i(TAG, "[SYSTEM] Starting SRT Heartbeat...")
         srtSender = SrtSender(targetHost, targetPort) {
+            // 这就是心跳通了之后的回调
+            Log.i(TAG, "[SYSTEM] Connection established! Activating stream...")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        // 绑定相机
+        // 相机和编码器先初始化好，但 SRT 会在底层过滤数据直到连通
         bindCamera()
     }
 
@@ -71,32 +72,20 @@ class MainActivity : AppCompatActivity() {
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             
-            // 使用最宽容的选择器
             val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(
-                    Size(1280, 720), 
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                ))
+                .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build()
 
-            // 预览 UseCase
-            val preview = Preview.Builder()
-                .setResolutionSelector(resSelector)
-                .build()
-                .also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
-
-            // 编码 UseCase
-            val encoderPreview = Preview.Builder()
-                .setResolutionSelector(resSelector)
-                .build()
+            val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
+            val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
             
-            // 关键：在收到 CameraX 的实际 Surface 请求时，才初始化 Encoder
             encoderPreview.setSurfaceProvider { request ->
-                val resolution = request.resolution
-                Log.i(TAG, "[CAMERA] Real Resolution: ${resolution.width}x${resolution.height}")
-                
-                // 根据实际分辨率重启编码器
-                initEncoder(resolution.width, resolution.height)
+                val res = request.resolution
+                videoEncoder?.stop()
+                videoEncoder = VideoEncoder(res.width, res.height, 2_000_000, 30) { data, ts, flags ->
+                    srtSender?.send(data, ts, flags)
+                }
+                videoEncoder?.start()
                 
                 videoEncoder?.getInputSurface()?.let { surface ->
                     request.provideSurface(surface, cameraExecutor) { }
@@ -106,26 +95,18 @@ class MainActivity : AppCompatActivity() {
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
-                Log.d(TAG, "[CAMERA] Bind Successful")
             } catch (exc: Exception) {
-                Log.e(TAG, "[CAMERA] Bind Failed", exc)
+                Log.e(TAG, "[CAMERA] Bind error", exc)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun initEncoder(width: Int, height: Int) {
-        videoEncoder?.stop()
-        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
-            srtSender?.send(data, ts, flags)
-        }
-        videoEncoder?.start()
-    }
-
     private fun stopEverything() {
-        videoEncoder?.stop()
+        Log.i(TAG, "[SYSTEM] Stopping all services")
         srtSender?.stop()
-        videoEncoder = null
+        videoEncoder?.stop()
         srtSender = null
+        videoEncoder = null
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
