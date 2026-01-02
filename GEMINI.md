@@ -5,6 +5,7 @@
 ## 🌟 Key Features
 
 *   **Ultra-Low Latency**: Optimized for <50ms glass-to-glass latency on 5GHz WiFi.
+*   **Always-On Screensaver**: Automatically displays professional SMPTE color bars when no client is connected, preventing V4L2 consumer errors.
 *   **Seamless Codec Switching**: Runtime H.264/H.265 switching via "Caps Lockdown" (no V4L2 freezes).
 *   **Dual Codec Support**:
     *   **H.264 (AVC)**: Maximum compatibility.
@@ -30,9 +31,10 @@
     *   Port **5001**: Dedicated H.265 pipeline (`h265parse ! avdec_h265`).
 *   **Pipeline Strategy**:
     *   **Caps Lockdown**: Forces `appsrc` to a fixed format (I420 1080p). This deceives downstream consumers (like OBS), preventing pipeline negotiation freezes during codec changes.
+    *   **Screensaver Mode**: Uses a secondary `videotestsrc` pipeline to feed SMPTE bars when idle.
     *   **Persistent Sink**: Keeps `/dev/video10` open.
     *   **Dynamic Source**: Receives SRT stream, decodes, scales, and pushes to Sink.
-    *   **Watchdog**: Monitors data flow. If idle for >500ms, clears buffers.
+    *   **Watchdog**: Monitors data flow. If idle for >500ms, switches to screensaver mode.
 
 ## 🚀 Getting Started
 
@@ -63,6 +65,7 @@
     *   Fixed resolution switching using server-side `videoscale`.
     *   Added H.265 support via dual-port architecture.
     *   **Major Breakthrough**: Implemented "Caps Lockdown" to enable seamless runtime codec switching.
+    *   **UX Upgrade**: Implemented SMPTE color bars as an "Always-On" screensaver for idle states.
     *   Implemented intelligent Watchdog to prevent caps thrashing.
 
 ---
