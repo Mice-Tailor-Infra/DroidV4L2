@@ -62,8 +62,6 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "[UI] Applying new settings and restarting stream")
             startStreaming()
         }
-        
-        // 注意：onCreate 里不再直接启动，全部交给 onResume 处理
     }
 
     override fun onResume() {
@@ -97,16 +95,19 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing..."
 
-        srtSender = SrtSender(host, 5000) {
-            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED" }
-            videoEncoder?.requestKeyFrame()
-        }
-        srtSender?.start()
-        
+        // 关键修复：先初始化 Encoder，确保对象存在
         videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
+
+        // 再启动 Network，这样 onConnected 回调时 encoder 已经就绪
+        srtSender = SrtSender(host, 5000) {
+            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED" }
+            Log.i(TAG, "[SYSTEM] Connection established. Requesting IDR frame...")
+            videoEncoder?.requestKeyFrame()
+        }
+        srtSender?.start()
         
         bindCamera(w, h)
     }
