@@ -13,7 +13,7 @@ class VideoEncoder(
     private val height: Int,
     private val bitRate: Int,
     private val frameRate: Int,
-    private val onEncodedData: (ByteArray, Long, Int) -> Unit // Added flags parameter
+    private val onEncodedData: (ByteArray, Long, Int) -> Unit
 ) {
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -24,9 +24,15 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second for GOP
+            
+            // --- 低延迟核心配置 ---
+            // 提示编码器尽快输出，不要缓存
             setInteger(MediaFormat.KEY_LATENCY, 0)
+            // 实时优先级
             setInteger(MediaFormat.KEY_PRIORITY, 0)
+            // 使用 CBR 模式减少码率波动导致的缓冲
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         }
 
         mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
@@ -41,7 +47,7 @@ class VideoEncoder(
                         
                         val data = ByteArray(info.size)
                         outputBuffer.get(data)
-                        onEncodedData(data, info.presentationTimeUs, info.flags) // Pass the real flags
+                        onEncodedData(data, info.presentationTimeUs, info.flags)
                         
                         codec.releaseOutputBuffer(index, false)
                     }

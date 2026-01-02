@@ -16,21 +16,27 @@ fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("Failed to initialize GStreamer")?;
 
-    // 显式指定接收 MPEG-TS 格式，这是解决 not-negotiated 的关键
+    // 低延迟优化：
+    // 1. latency=20: 降低 SRT 协议缓冲
+    // 2. queue max-size-buffers=1: 强制丢弃旧包，只处理最新的一帧
+    // 3. sync=false: v4l2sink 不等待时钟同步
     let pipeline_str = format!(
-        "srtsrc uri=srt://:{}?mode=listener&latency=50&streamid=live ! tsdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={}",
-        args.port, args.device
+        "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! \
+         tsdemux ! h264parse ! avdec_h264 ! \
+         queue max-size-buffers=1 leaky=downstream ! \
+         videoconvert ! video/x-raw,format=YUY2 ! \
+         v4l2sink device={} sync=false",
+        args.port,
+        args.device
     );
 
-    println!("Starting SRT Bridge...");
+    println!("Starting Low-Latency SRT Bridge...");
     println!("Pipeline: {}", pipeline_str);
 
     let pipeline = gst::parse_launch(&pipeline_str).context("Failed to parse pipeline")?;
     pipeline.set_state(gst::State::Playing).context("Failed to set Playing state")?;
 
     let bus = pipeline.bus().expect("Pipeline without bus");
-    println!("Waiting for Android data...");
-
     for msg in bus.iter_timed(gst::ClockTime::NONE) {
         use gst::MessageView;
         match msg.view() {
@@ -39,12 +45,8 @@ fn main() -> Result<()> {
                 eprintln!("ERROR from {}: {} ({:?})", src_name, err.error(), err.debug());
                 break;
             }
-            MessageView::StateChanged(s) => {
-                if let Some(src) = msg.src() {
-                    if src.has_pipeline(&pipeline) {
-                        println!("Pipeline state: {:?} -> {:?}", s.old(), s.current());
-                    }
-                }
+            MessageView::StateChanged(s) if msg.src().map(|src| src.has_pipeline(&pipeline)).unwrap_or(false) => {
+                println!("Pipeline state: {:?} -> {:?}", s.old(), s.current());
             }
             _ => (),
         }
