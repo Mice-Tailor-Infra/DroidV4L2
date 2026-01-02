@@ -15,9 +15,9 @@ struct Args {
 }
 
 fn run_pipeline(args: &Args) -> Result<()> {
-    // 每次启动都重新构建 pipeline
+    // 强制每次重新创建，确保资源释放干净
     let pipeline_str = format!(
-        "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! \
+        "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=1000 ! \
          tsdemux ! h264parse ! avdec_h264 ! \
          queue max-size-buffers=1 leaky=downstream ! \
          videoconvert ! video/x-raw,format=YUY2 ! \
@@ -25,34 +25,38 @@ fn run_pipeline(args: &Args) -> Result<()> {
         args.port, args.device
     );
 
-    println!("Pipeline building: {}", pipeline_str);
+    println!("Building new pipeline...");
     let pipeline = gst::parse_launch(&pipeline_str).context("Failed to parse pipeline")?;
+    
     pipeline.set_state(gst::State::Playing).context("Failed to set Playing state")?;
+    println!("Bridge listening on port {} (streamid=live)...", args.port);
 
     let bus = pipeline.bus().expect("Pipeline without bus");
-    println!("Waiting for connection or data...");
-
+    
     for msg in bus.iter_timed(gst::ClockTime::NONE) {
         use gst::MessageView;
         match msg.view() {
             MessageView::Error(err) => {
                 let src_name = msg.src().map(|s| s.path_string()).unwrap_or_else(|| "unknown".into());
-                eprintln!("Pipeline Error from {}: {}. Restarting...", src_name, err.error());
-                break; // 跳出内部循环，触发重启
+                println!("Pipeline Error (from {}): {}. Resetting...", src_name, err.error());
+                break; 
             }
             MessageView::Eos(..) => {
-                println!("End of stream. Restarting...");
+                println!("Source disconnected (EOS). Resetting...");
                 break;
             }
-            MessageView::StateChanged(s) if msg.src().map(|src| src.has_pipeline(&pipeline)).unwrap_or(false) => {
-                if s.current() == gst::State::Playing {
-                    println!("--- STREAM ACTIVE ---");
+            MessageView::StateChanged(s) => {
+                if let Some(src) = msg.src() {
+                    if src.has_pipeline(&pipeline) && s.current() == gst::State::Playing {
+                        println!("--- SRT DATA STREAM ACTIVE ---");
+                    }
                 }
             }
             _ => (),
         }
     }
 
+    println!("Cleaning up pipeline...");
     pipeline.set_state(gst::State::Null)?;
     Ok(())
 }
@@ -61,14 +65,15 @@ fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("Failed to initialize GStreamer")?;
 
-    println!("DroidV4L2 Bridge Started.");
+    println!("DroidV4L2 Linux Bridge Started.");
     
-    // 无限重启循环
     loop {
         if let Err(e) = run_pipeline(&args) {
-            eprintln!("Pipeline execution failed: {}. Retrying in 1s...", e);
+            eprintln!("Pipeline execution failed: {}. Restarting in 1s...", e);
             thread::sleep(Duration::from_secs(1));
         }
+        // 给系统一点点缓冲时间来完全释放端口
+        thread::sleep(Duration::from_millis(200));
     }
 }
 
