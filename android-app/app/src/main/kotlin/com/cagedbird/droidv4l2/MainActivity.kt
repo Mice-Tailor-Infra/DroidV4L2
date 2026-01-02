@@ -9,10 +9,9 @@ import android.util.Size
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
@@ -35,6 +34,7 @@ class MainActivity : AppCompatActivity() {
         val container = FrameLayout(this)
         viewFinder = PreviewView(this).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
         container.addView(viewFinder)
         setContentView(container)
@@ -44,36 +44,32 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (allPermissionsGranted()) {
-            startStreaming()
+            startEverything()
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
     }
 
-    // 监听旋转，动态改变分辨率
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        Log.i(TAG, "[UI] Orientation changed, restarting stream for sync")
-        startStreaming()
+    override fun onPause() {
+        super.onPause()
+        stopEverything()
     }
 
-    private fun startStreaming() {
-        stopStreaming()
-        
-        // 动态计算分辨率：横屏 1280x720, 竖屏 720x1280
+    private fun startEverything() {
+        // 固定编码器分辨率为 720p 16:9 比例
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         val width = if (isPortrait) 720 else 1280
         val height = if (isPortrait) 1280 else 720
         
-        Log.i(TAG, "[ENCODER] Initializing at ${width}x${height}")
+        Log.i(TAG, "[START] Resolution: ${width}x${height}")
 
         srtSender = SrtSender(targetHost, targetPort) {
-            Log.i(TAG, "[NETWORK] SRT Handshake OK, requesting IDR")
+            Log.i(TAG, "[SYNC] Connected, requesting Keyframe")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        videoEncoder = VideoEncoder(width, height, 2_500_000, 30) { data, ts, flags ->
+        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
@@ -85,40 +81,42 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(Size(width, height), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+            
+            // 1. 预览 UseCase：使用 AspectRatio，极其稳定
+            val preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
                 .build()
+                .also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
 
-            val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
-            val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
+            // 2. 编码 UseCase：锁定到我们想要的宽高
+            val encoderPreview = Preview.Builder()
+                .setTargetResolution(Size(width, height))
+                .build()
             
             videoEncoder?.getInputSurface()?.let { surface ->
-                encoderPreview.setSurfaceProvider { request -> request.provideSurface(surface, cameraExecutor) { } }
+                encoderPreview.setSurfaceProvider { request ->
+                    request.provideSurface(surface, cameraExecutor) { }
+                }
             }
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
-                Log.d(TAG, "[CAMERA] Bound successfully")
+                Log.d(TAG, "[CAMERA] Bind success")
             } catch (exc: Exception) {
                 Log.e(TAG, "[CAMERA] Bind failed", exc)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun stopStreaming() {
-        srtSender?.stop()
+    private fun stopEverything() {
         videoEncoder?.stop()
-        srtSender = null
+        srtSender?.stop()
         videoEncoder = null
+        srtSender = null
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-    override fun onPause() {
-        super.onPause()
-        stopStreaming()
-    }
 
     override fun onDestroy() {
         super.onDestroy()
