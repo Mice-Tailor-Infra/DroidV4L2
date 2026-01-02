@@ -53,7 +53,4 @@ dependencies {
 
     // RootEncoder (All-in-one Clients)
     implementation("com.github.pedroSG94.RootEncoder:library:2.6.1")
-    
-    // Standalone RTSP Server
-    implementation("com.github.pedroSG94:RTSP-Server:1.3.6")
 }

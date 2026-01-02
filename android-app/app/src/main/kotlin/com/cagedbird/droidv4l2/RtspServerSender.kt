@@ -1,68 +1,103 @@
 package com.cagedbird.droidv4l2
 
 import android.media.MediaCodec
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import com.pedro.common.ConnectChecker
-import com.pedro.rtspserver.server.RtspServer
-import com.pedro.common.VideoCodec
-import java.nio.ByteBuffer
+import com.cagedbird.droidv4l2.rtspserver.RtpPacketizer
+import com.cagedbird.droidv4l2.rtspserver.RtspSession
+import com.cagedbird.droidv4l2.rtspserver.TinyRtspServer
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.util.concurrent.CopyOnWriteArrayList
 
 class RtspServerSender(
     private val port: Int,
     private val isHevc: Boolean,
     private val onClientConnected: () -> Unit
-) : ConnectChecker, VideoSender {
+) : VideoSender {
     private val TAG = "RtspServerSender"
-    private val rtspServer = RtspServer(this, port)
-    private val handler = Handler(Looper.getMainLooper())
     
-    // Cache SPS/PPS/VPS to set format header
+    private val sessions = CopyOnWriteArrayList<RtspSession>()
+    private val packetizer = RtpPacketizer(isHevc)
+    
+    private val rtspServer = TinyRtspServer(port) { session ->
+        session.isHevc = isHevc
+        session.vps = cachedVps
+        session.sps = cachedSps
+        session.pps = cachedPps
+        sessions.add(session)
+        onClientConnected()
+    }
+    
     private var cachedVps: ByteArray? = null
     private var cachedSps: ByteArray? = null
     private var cachedPps: ByteArray? = null
     
     private val localIp: String by lazy { getLocalIpAddress() ?: "0.0.0.0" }
 
-    init {
-        // RtspServer sets video codec dynamically based on stream info
-    }
-
     override fun start() {
-        Log.i(TAG, "Starting RTSP Server on port $port")
-        rtspServer.startServer()
+        Log.i(TAG, "Starting TinyRTSP Server on port $port")
+        rtspServer.start()
     }
 
     override fun stop() {
-        Log.i(TAG, "Stopping RTSP Server")
-        rtspServer.stopServer()
+        Log.i(TAG, "Stopping TinyRTSP Server")
+        rtspServer.stop()
+        sessions.forEach { it.stop() }
+        sessions.clear()
     }
 
     override fun send(data: ByteArray, timestampUs: Long, flags: Int) {
         if ((flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
             parseConfigData(data)
-            // RtspServer needs SPS/PPS to set up the SDP (Session Description Protocol)
-            if (isHevc) {
-               if (cachedSps != null && cachedPps != null && cachedVps != null) {
-                   rtspServer.setVideoInfo(ByteBuffer.wrap(cachedSps), ByteBuffer.wrap(cachedPps), ByteBuffer.wrap(cachedVps))
-               }
-            } else {
-               if (cachedSps != null && cachedPps != null) {
-                   rtspServer.setVideoInfo(ByteBuffer.wrap(cachedSps), ByteBuffer.wrap(cachedPps), null)
-               }
+            // Update active sessions with new config
+            sessions.forEach {
+                it.vps = cachedVps
+                it.sps = cachedSps
+                it.pps = cachedPps
             }
         } else {
-             val buffer = ByteBuffer.wrap(data)
-             val info = MediaCodec.BufferInfo().apply {
-                size = data.size
-                presentationTimeUs = timestampUs
-                offset = 0
-                this.flags = flags
+            // Strip Start Code (00 00 00 01)
+            // MediaCodec usually returns Annex B format
+            var offset = 0
+            if (data.size > 4 && data[0] == 0.toByte() && data[1] == 0.toByte() && 
+                data[2] == 0.toByte() && data[3] == 1.toByte()) {
+                offset = 4
+            } else if (data.size > 3 && data[0] == 0.toByte() && data[1] == 0.toByte() && 
+                data[2] == 1.toByte()) {
+                offset = 3
             }
-            rtspServer.sendVideo(buffer, info)
+
+            val nalu = if (offset > 0) {
+                data.copyOfRange(offset, data.size)
+            } else {
+                data
+            }
+
+            // KEY FRAME INJECTION FOR HEVC
+            if (isHevc && (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                // Send VPS/SPS/PPS before the IDR frame
+                cachedVps?.let { packetizer.packetize(it, timestampUs) { p, _ -> broadcast(p) } }
+                cachedSps?.let { packetizer.packetize(it, timestampUs) { p, _ -> broadcast(p) } }
+                cachedPps?.let { packetizer.packetize(it, timestampUs) { p, _ -> broadcast(p) } }
+            }
+            
+            // We use the packetizer to turn NALU into RTP packets
+            packetizer.packetize(nalu, timestampUs) { packet, _ ->
+                broadcast(packet)
+            }
+        }
+    }
+
+    private fun broadcast(packet: ByteArray) {
+        val iterator = sessions.iterator()
+        while (iterator.hasNext()) {
+            val session = iterator.next()
+            try {
+                session.sendRtpPacket(packet)
+            } catch (e: Exception) {
+                session.stop()
+                sessions.remove(session)
+            }
         }
     }
 
@@ -102,47 +137,25 @@ class RtspServerSender(
         for (k in 0 until indices.size - 1) {
             val start = indices[k]
             val end = indices[k+1]
-            val nal = data.copyOfRange(start, end)
+            // Skip start code
+            val nalStart = start + 4
+            if (nalStart >= end) continue
+            val nal = data.copyOfRange(nalStart, end)
             
             if (isHevc) {
-                if (nal.size > 4) {
-                    val type = (nal[4].toInt() shr 1) and 0x3F
-                    when (type) {
-                        32 -> cachedVps = nal
-                        33 -> cachedSps = nal
-                        34 -> cachedPps = nal
-                    }
+                val type = (nal[0].toInt() shr 1) and 0x3F
+                when (type) {
+                    32 -> cachedVps = nal
+                    33 -> cachedSps = nal
+                    34 -> cachedPps = nal
                 }
             } else {
-                if (nal.size > 4) {
-                    val type = nal[4].toInt() and 0x1F
-                    when (type) {
-                        7 -> cachedSps = nal
-                        8 -> cachedPps = nal
-                    }
+                val type = nal[0].toInt() and 0x1F
+                when (type) {
+                    7 -> cachedSps = nal
+                    8 -> cachedPps = nal
                 }
             }
         }
     }
-
-    // ConnectChecker implementation for RtspServer (Client connections)
-    override fun onConnectionStarted(url: String) {
-        Log.d(TAG, "Client connecting: $url")
-    }
-    
-    override fun onConnectionSuccess() {
-        Log.i(TAG, "Client Connected!")
-        handler.post { onClientConnected() }
-    }
-    
-    override fun onConnectionFailed(reason: String) {
-        Log.e(TAG, "RTSP Error: $reason")
-    }
-    
-    override fun onNewBitrate(bitrate: Long) {}
-    override fun onDisconnect() {
-        Log.i(TAG, "Client Disconnected")
-    }
-    override fun onAuthError() {}
-    override fun onAuthSuccess() {}
 }

@@ -4,6 +4,8 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import java.util.concurrent.ExecutorService
@@ -20,8 +22,14 @@ class VideoEncoder(
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
     private val encoderExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var backgroundThread: HandlerThread? = null
+    private var backgroundHandler: Handler? = null
 
     fun start() {
+        // Start a background thread for MediaCodec callbacks to avoid NetworkOnMainThreadException
+        backgroundThread = HandlerThread("VideoEncoderThread").apply { start() }
+        backgroundHandler = Handler(backgroundThread!!.looper)
+
         val format = MediaFormat.createVideoFormat(mimeType, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
@@ -48,7 +56,8 @@ class VideoEncoder(
                 }
                 override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) { e.printStackTrace() }
                 override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {}
-            })
+            }, backgroundHandler) // Pass the background handler here!
+            
             configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             inputSurface = createInputSurface()
             start()
@@ -78,5 +87,9 @@ class VideoEncoder(
         mediaCodec = null
         inputSurface?.release()
         inputSurface = null
+        
+        backgroundThread?.quitSafely()
+        backgroundThread = null
+        backgroundHandler = null
     }
 }
