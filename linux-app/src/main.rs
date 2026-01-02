@@ -62,9 +62,9 @@ fn main() -> Result<()> {
 
     loop {
         println!("[NETWORK] Waiting for Android stream on port {}...", args.port);
-        // poll-timeout 改为 2000，增加握手成功率
+        // 移除 poll-timeout，让它永远监听，防止端口反复开关
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=2000 ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
             args.port
         );
 
