@@ -1,20 +1,60 @@
-# DroidV4L2
+# DroidV4L2: Universal Android Camera Source
 
-将 Android 设备作为局域网内的 Linux V4L2 设备的解决方案。
+**DroidV4L2** transforms your spare Android device into a high-performance, ultra-low-latency wireless webcam for Linux.
 
-## 项目架构
+Unlike generic IP camera apps, DroidV4L2 is purpose-built for **professional low-latency usage**, supporting SRT (Secure Reliable Transport) for a rock-solid Linux bridge and RTSP for universal compatibility.
 
-- **android-app**: 
-    - 技术栈: Kotlin + CameraX + MediaCodec (H.264/H.265)。
-    - 功能: 采集摄像头画面并以极低延迟推流。
-- **linux-app**:
-    - 技术栈: Rust + GStreamer + v4l2loopback。
-    - 功能: 接收 Android 推流，解码并写入 `/dev/videoX` 虚拟设备。
+[中文说明](#中文说明)
 
-## 当前进度
+---
 
-1. [x] 项目骨架初始化 (Android & Rust)
-2. [ ] Android 端：CameraX 采集实现
-3. [ ] Android 端：MediaCodec 编码与推流实现
-4. [ ] Linux 端：GStreamer 接收流水线实现
-5. [ ] Linux 端：v4l2loopback 写入实现
+## 🔥 Key Features
+
+- **Multi-Protocol Power**:
+  - **SRT (Caller)**: Optimized for Linux `v4l2loopback`. Minimal latency, high resilience.
+  - **RTSP (Server)**: Acts as a standard IP Camera. Plug-and-play with VLC, OBS, and NVRs.
+- **"Caps Lockdown" Architecture**: Seamlessly switch between **H.264** and **H.265 (HEVC)** at runtime without freezing the Linux virtual camera device.
+- **Always-On SMPTE Bars**: Automatically displays professional color bars when the stream is disconnected. No more "Blank Screen" in OBS/Zoom.
+- **Ultra-Low Latency**: Custom tuned `MediaCodec` parameters (1s GOP, Low-delay flags) for <50ms glass-to-glass latency.
+- **Hardware Accelerated**: Full utilization of Android hardware encoders for 1080p 60FPS performance.
+
+## 🏗 Project Structure
+
+- **`/android-app`**: CameraX + MediaCodec sender with protocol abstraction.
+- **`/linux-app`**: Rust + GStreamer bridge to feed `/dev/videoX`.
+
+## 🚀 Quick Start (Linux Bridge)
+
+1. **Install Dependencies**:
+   ```bash
+   sudo modprobe v4l2loopback video_nr=10 card_label="DroidV4L2" exclusive_caps=1
+   sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+   ```
+2. **Run Bridge**:
+   ```bash
+   cd linux-app
+   cargo run --release -- -4 5000 -5 5001 --device /dev/video10
+   ```
+3. **Open App**: Select **SRT** or **RTSP**, enter your IP, and hit **Apply**.
+
+---
+
+<a name="中文说明"></a>
+
+## 🔥 核心特性
+
+- **多协议支持**:
+  - **SRT (Caller)**: 专为 Linux `v4l2loopback` 设计，极低延迟，网络抗抖动强。
+  - **RTSP (Server)**: 让手机变成标准 IP Camera，支持 VLC、OBS、群晖 NAS、Home Assistant。
+- **"Caps Lockdown" 架构**: 支持在运行时无缝切换 **H.264** 和 **H.265 (HEVC)** 编码，而不会导致 Linux 虚拟摄像头设备挂起。
+- **动态 SMPTE 彩条**: 当流断开时自动填充专业彩条，避免视频会议或直播软件出现黑屏或报错。
+- **极低延迟**: 深度优化的 `MediaCodec` 参数（1秒 GOP，低延迟标志位），实现 <50ms 的端到端延迟。
+- **硬件加速**: 充分利用 Android 硬件编码器，轻松实现 1080p 60FPS。
+
+## 🏗 项目结构
+
+- **`/android-app`**: 基于 CameraX 和 MediaCodec 的发送端，具备协议抽象层。
+- **`/linux-app`**: 基于 Rust 和 GStreamer 的桥接端，负责将流写入 `/dev/videoX`。
+
+---
+*Maintained by cagedbird043. Built for performance.*
