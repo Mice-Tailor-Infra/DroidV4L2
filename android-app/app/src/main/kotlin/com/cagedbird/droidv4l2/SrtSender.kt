@@ -14,7 +14,7 @@ class SrtSender(
     private val port: Int,
     private val isHevc: Boolean,
     private val onConnected: () -> Unit
-) : ConnectChecker {
+) : ConnectChecker, VideoSender {
     private val TAG = "SrtSender"
     private val srtClient = SrtClient(this)
     private val handler = Handler(Looper.getMainLooper())
@@ -29,7 +29,7 @@ class SrtSender(
         srtClient.setVideoCodec(if (isHevc) VideoCodec.H265 else VideoCodec.H264)
     }
 
-    fun start() {
+    override fun start() {
         isStopped = false
         connectInternal()
     }
@@ -41,7 +41,7 @@ class SrtSender(
         srtClient.connect(url)
     }
 
-    fun send(data: ByteArray, timestampUs: Long, flags: Int) {
+    override fun send(data: ByteArray, timestampUs: Long, flags: Int) {
         if ((flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
             parseConfigData(data)
             if (srtClient.isStreaming) sendConfigPackets()
@@ -56,6 +56,8 @@ class SrtSender(
             srtClient.sendVideo(buffer, info)
         }
     }
+
+    override fun getInfo(): String = "srt://$host:$port"
 
     private fun parseConfigData(data: ByteArray) {
         val indices = mutableListOf<Int>()
@@ -115,7 +117,7 @@ class SrtSender(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         Log.d(TAG, "[CLEANUP] stop() called, disabling retries")
         isStopped = true
         handler.removeCallbacksAndMessages(null)

@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private var viewFinder: PreviewView? = null
     private var videoEncoder: VideoEncoder? = null
-    private var srtSender: SrtSender? = null
+    private var videoSender: VideoSender? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         val spinnerRes = findViewById<Spinner>(R.id.spinnerRes)
         val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
         val spinnerCodec = findViewById<Spinner>(R.id.spinnerCodec)
+        val spinnerProtocol = findViewById<Spinner>(R.id.spinnerProtocol)
 
         val resOptions = arrayOf("720p", "1080p", "480p")
         spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
@@ -56,6 +57,10 @@ class MainActivity : AppCompatActivity() {
         spinnerCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecOptions)
         spinnerCodec.setSelection(codecOptions.indexOf(prefs.getString("codec", "H.264")))
 
+        val protocolOptions = arrayOf("SRT (Caller)", "RTSP (Server)")
+        spinnerProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolOptions)
+        spinnerProtocol.setSelection(protocolOptions.indexOf(prefs.getString("protocol", "SRT (Caller)")))
+
         editIp.setText(prefs.getString("ip", "10.0.0.17"))
         editBitrate.setText(prefs.getInt("bitrate", 10).toString())
 
@@ -65,6 +70,7 @@ class MainActivity : AppCompatActivity() {
                 .putString("res", spinnerRes.selectedItem.toString())
                 .putString("fps", spinnerFps.selectedItem.toString())
                 .putString("codec", spinnerCodec.selectedItem.toString())
+                .putString("protocol", spinnerProtocol.selectedItem.toString())
                 .apply()
             
             Log.i(TAG, "[UI] Applying settings...")
@@ -97,7 +103,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startStreaming() {
         // 防止重复调用
-        if (srtSender != null) return
+        if (videoSender != null) return
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val host = prefs.getString("ip", "10.0.0.17")!!
@@ -105,6 +111,7 @@ class MainActivity : AppCompatActivity() {
         val resStr = prefs.getString("res", "720p")
         val fps = prefs.getString("fps", "30")?.toInt() ?: 30
         val codecStr = prefs.getString("codec", "H.264")
+        val protocolStr = prefs.getString("protocol", "SRT (Caller)")
 
         val (w, h) = when(resStr) {
             "1080p" -> 1920 to 1080
@@ -116,19 +123,32 @@ class MainActivity : AppCompatActivity() {
         val mimeType = if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
         val port = if (isHevc) 5001 else 5000
 
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing $codecStr on port $port..."
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing $codecStr via $protocolStr..."
 
         videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps, mimeType) { data, ts, flags ->
-            srtSender?.send(data, ts, flags)
+            videoSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
 
-        srtSender = SrtSender(host, port, isHevc) {
-            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED ($codecStr)" }
-            videoEncoder?.requestKeyFrame()
+        if (protocolStr == "SRT (Caller)") {
+            videoSender = SrtSender(host, port, isHevc) {
+                runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED (${videoSender?.getInfo()})" }
+                videoEncoder?.requestKeyFrame()
+            }
+        } else {
+            // RTSP Server Mode (Port 8554)
+            videoSender = RtspServerSender(8554, isHevc) {
+                runOnUiThread { 
+                    // 当有客户端(VLC)连接上来时，触发关键帧，确保秒开
+                    videoEncoder?.requestKeyFrame()
+                    Toast.makeText(this, "Client Connected!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            // RTSP Server 启动即就绪，直接显示地址
+            findViewById<TextView>(R.id.txtStatus).text = "Server Online: ${videoSender?.getInfo()}"
         }
-        srtSender?.start()
         
+        videoSender?.start()
         bindCamera(w, h)
     }
 
@@ -156,9 +176,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopStreaming() {
         mainHandler.removeCallbacksAndMessages(null) // 清理之前的延迟任务
-        srtSender?.stop()
+        videoSender?.stop()
         videoEncoder?.stop()
-        srtSender = null
+        videoSender = null
         videoEncoder = null
     }
 
