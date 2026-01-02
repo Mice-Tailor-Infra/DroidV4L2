@@ -29,7 +29,7 @@ class SrtSender(
     private fun connectInternal() {
         if (isStopped || srtClient.isStreaming) return
         val url = "srt://$host:$port/live"
-        Log.d(TAG, "Connecting to $url")
+        Log.d(TAG, "Attempting SRT Connect: $url")
         srtClient.connect(url)
     }
 
@@ -67,18 +67,8 @@ class SrtSender(
     private fun sendConfigPackets() {
         val sps = cachedSps ?: return
         val pps = cachedPps ?: return
+        Log.i(TAG, "Syncing SPS/PPS to new connection")
         srtClient.setVideoInfo(ByteBuffer.wrap(sps), ByteBuffer.wrap(pps), null)
-        
-        val dummyInfo = MediaCodec.BufferInfo().apply {
-            offset = 0
-            presentationTimeUs = System.nanoTime() / 1000
-            flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-        }
-        
-        dummyInfo.size = sps.size
-        srtClient.sendVideo(ByteBuffer.wrap(sps), dummyInfo)
-        dummyInfo.size = pps.size
-        srtClient.sendVideo(ByteBuffer.wrap(pps), dummyInfo)
     }
 
     fun stop() {
@@ -89,20 +79,20 @@ class SrtSender(
 
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
-        Log.i(TAG, "SRT SUCCESS")
+        Log.i(TAG, "CONNECTED SUCCESS")
         sendConfigPackets()
         onConnected()
     }
     
     override fun onConnectionFailed(reason: String) {
-        Log.e(TAG, "SRT FAILED: $reason. Retrying in 2s...")
+        Log.e(TAG, "CONNECTION FAILED: $reason. Retrying...")
         if (!isStopped) retryHandler.postDelayed({ connectInternal() }, 2000)
     }
     
     override fun onNewBitrate(bitrate: Long) {}
     override fun onDisconnect() {
-        Log.w(TAG, "SRT DISCONNECTED. Reconnecting...")
-        if (!isStopped) retryHandler.postDelayed({ connectInternal() }, 1000)
+        Log.w(TAG, "DISCONNECTED. Retrying...")
+        if (!isStopped) retryHandler.postDelayed({ connectInternal() }, 2000)
     }
     override fun onAuthError() {}
     override fun onAuthSuccess() {}

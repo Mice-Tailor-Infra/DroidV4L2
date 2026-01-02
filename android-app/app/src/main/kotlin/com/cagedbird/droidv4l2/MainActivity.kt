@@ -31,17 +31,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
         val container = FrameLayout(this)
         viewFinder = PreviewView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         container.addView(viewFinder)
         setContentView(container)
-
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
@@ -60,10 +55,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startStreaming() {
-        Log.d(TAG, "Initializing components...")
-        
         srtSender = SrtSender(targetHost, targetPort) {
-            // 连接成功后，强制编码器刷新一个关键帧，让 Linux 端的解码器立刻“复活”
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
@@ -80,27 +72,15 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            
             val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(
-                    Size(1280, 720), 
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                ))
+                .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build()
 
-            val preview = Preview.Builder()
-                .setResolutionSelector(resSelector)
-                .build()
-                .also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
-
-            val encoderPreview = Preview.Builder()
-                .setResolutionSelector(resSelector)
-                .build()
+            val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
+            val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
             
             videoEncoder?.getInputSurface()?.let { surface ->
-                encoderPreview.setSurfaceProvider { request ->
-                    request.provideSurface(surface, cameraExecutor) { }
-                }
+                encoderPreview.setSurfaceProvider { request -> request.provideSurface(surface, cameraExecutor) { } }
             }
 
             try {
@@ -113,7 +93,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopStreaming() {
-        Log.d(TAG, "Stopping components...")
         srtSender?.stop()
         videoEncoder?.stop()
         srtSender = null
@@ -121,11 +100,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 10 && allPermissionsGranted()) startStreaming()
-    }
 
     override fun onDestroy() {
         super.onDestroy()
