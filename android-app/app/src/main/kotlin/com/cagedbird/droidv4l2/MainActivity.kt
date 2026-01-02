@@ -2,7 +2,6 @@ package com.cagedbird.droidv4l2
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
@@ -12,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
@@ -34,7 +35,6 @@ class MainActivity : AppCompatActivity() {
         val container = FrameLayout(this)
         viewFinder = PreviewView(this).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
         container.addView(viewFinder)
         setContentView(container)
@@ -56,45 +56,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startEverything() {
-        // 固定编码器分辨率为 720p 16:9 比例
-        val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-        val width = if (isPortrait) 720 else 1280
-        val height = if (isPortrait) 1280 else 720
-        
-        Log.i(TAG, "[START] Resolution: ${width}x${height}")
-
+        // 先建立网络连接
         srtSender = SrtSender(targetHost, targetPort) {
-            Log.i(TAG, "[SYNC] Connected, requesting Keyframe")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
-            srtSender?.send(data, ts, flags)
-        }
-        videoEncoder?.start()
-        
-        bindCamera(width, height)
+        // 绑定相机
+        bindCamera()
     }
 
-    private fun bindCamera(width: Int, height: Int) {
+    private fun bindCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             
-            // 1. 预览 UseCase：使用 AspectRatio，极其稳定
+            // 使用最宽容的选择器
+            val resSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(ResolutionStrategy(
+                    Size(1280, 720), 
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                ))
+                .build()
+
+            // 预览 UseCase
             val preview = Preview.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+                .setResolutionSelector(resSelector)
                 .build()
                 .also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
 
-            // 2. 编码 UseCase：锁定到我们想要的宽高
+            // 编码 UseCase
             val encoderPreview = Preview.Builder()
-                .setTargetResolution(Size(width, height))
+                .setResolutionSelector(resSelector)
                 .build()
             
-            videoEncoder?.getInputSurface()?.let { surface ->
-                encoderPreview.setSurfaceProvider { request ->
+            // 关键：在收到 CameraX 的实际 Surface 请求时，才初始化 Encoder
+            encoderPreview.setSurfaceProvider { request ->
+                val resolution = request.resolution
+                Log.i(TAG, "[CAMERA] Real Resolution: ${resolution.width}x${resolution.height}")
+                
+                // 根据实际分辨率重启编码器
+                initEncoder(resolution.width, resolution.height)
+                
+                videoEncoder?.getInputSurface()?.let { surface ->
                     request.provideSurface(surface, cameraExecutor) { }
                 }
             }
@@ -102,11 +106,19 @@ class MainActivity : AppCompatActivity() {
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
-                Log.d(TAG, "[CAMERA] Bind success")
+                Log.d(TAG, "[CAMERA] Bind Successful")
             } catch (exc: Exception) {
-                Log.e(TAG, "[CAMERA] Bind failed", exc)
+                Log.e(TAG, "[CAMERA] Bind Failed", exc)
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun initEncoder(width: Int, height: Int) {
+        videoEncoder?.stop()
+        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
+            srtSender?.send(data, ts, flags)
+        }
+        videoEncoder?.start()
     }
 
     private fun stopEverything() {
