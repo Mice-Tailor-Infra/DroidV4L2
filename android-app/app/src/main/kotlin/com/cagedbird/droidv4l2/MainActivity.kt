@@ -5,9 +5,13 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
@@ -18,7 +22,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private val TAG = "DroidV4L2"
     private lateinit var cameraExecutor: ExecutorService
-    private lateinit var viewFinder: PreviewView
+    private var viewFinder: PreviewView? = null
     private var videoEncoder: VideoEncoder? = null
     private var srtSender: SrtSender? = null
 
@@ -27,8 +31,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        viewFinder = PreviewView(this)
-        setContentView(viewFinder)
+        
+        val container = FrameLayout(this)
+        viewFinder = PreviewView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        container.addView(viewFinder)
+        setContentView(container)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -40,46 +52,73 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startEverything() {
+        // 固定分辨率，减少变化
+        val width = 1280
+        val height = 720
+        
+        Log.d(TAG, "Starting: ${width}x${height}")
+
         srtSender = SrtSender(targetHost, targetPort)
         srtSender?.start()
         
-        videoEncoder = VideoEncoder(1280, 720, 2_000_000, 30) { data, ts, flags ->
+        videoEncoder = VideoEncoder(width, height, 2_000_000, 30) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
         
-        startCamera()
+        bindCamera(width, height)
     }
 
-    private fun startCamera() {
+    private fun bindCamera(width: Int, height: Int) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(viewFinder.surfaceProvider)
-            }
+            // 使用 ResolutionSelector 更加稳健
+            val resSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(ResolutionStrategy(
+                    Size(width, height), 
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                ))
+                .build()
+
+            val preview = Preview.Builder()
+                .setResolutionSelector(resSelector)
+                .build()
+                .also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
 
             val encoderPreview = Preview.Builder()
-                .setTargetResolution(Size(1280, 720))
+                .setResolutionSelector(resSelector)
                 .build()
             
             videoEncoder?.getInputSurface()?.let { surface ->
                 encoderPreview.setSurfaceProvider { request ->
+                    Log.d(TAG, "Encoder surface linked")
                     request.provideSurface(surface, cameraExecutor) { }
                 }
             }
 
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
+                cameraProvider.bindToLifecycle(
+                    this, 
+                    CameraSelector.DEFAULT_BACK_CAMERA, 
+                    preview, 
+                    encoderPreview
+                )
+                Log.d(TAG, "Bind success")
             } catch (exc: Exception) {
-                Log.e(TAG, "Bind failed", exc)
+                Log.e(TAG, "Bind failed: ${exc.message}")
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 10 && allPermissionsGranted()) startEverything()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
