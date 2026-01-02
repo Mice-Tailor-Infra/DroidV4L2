@@ -16,9 +16,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("Failed to initialize GStreamer")?;
 
-    // 使用 decodebin 自动处理格式，并强制输出 YUY2 给 v4l2sink
+    // 显式指定接收 MPEG-TS 格式，这是解决 not-negotiated 的关键
     let pipeline_str = format!(
-        "srtsrc uri=srt://:{}?mode=listener&latency=50&streamid=live ! decodebin ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={}",
+        "srtsrc uri=srt://:{}?mode=listener&latency=50&streamid=live ! tsdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={}",
         args.port, args.device
     );
 
@@ -29,6 +29,8 @@ fn main() -> Result<()> {
     pipeline.set_state(gst::State::Playing).context("Failed to set Playing state")?;
 
     let bus = pipeline.bus().expect("Pipeline without bus");
+    println!("Waiting for Android data...");
+
     for msg in bus.iter_timed(gst::ClockTime::NONE) {
         use gst::MessageView;
         match msg.view() {
