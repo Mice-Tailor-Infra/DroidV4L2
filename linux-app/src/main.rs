@@ -4,7 +4,7 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gst::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::thread;
 
 #[derive(Parser, Debug)]
@@ -18,17 +18,22 @@ struct Args {
 
 struct SharedState {
     last_sample: Option<gst::Sample>,
+    frame_count: u64,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("GStreamer init failed")?;
 
-    let shared_state = Arc::new(Mutex::new(SharedState { last_sample: None }));
+    let shared_state = Arc::new(Mutex::new(SharedState { 
+        last_sample: None,
+        frame_count: 0,
+    }));
 
     // --- 1. 持久 Sink 管线 (保持 V4L2 永远在线) ---
+    // 去掉固定宽高，由 appsrc 根据传入的数据自动协商
     let sink_pipeline_str = format!(
-        "appsrc name=mysrc is-live=true format=time ! video/x-raw,format=I420,width=1280,height=720,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={} sync=false",
+        "appsrc name=mysrc is-live=true format=time ! videoconvert ! v4l2sink device={} sync=false",
         args.device
     );
     let sink_pipeline = gst::parse_launch(&sink_pipeline_str)?;
@@ -38,13 +43,14 @@ fn main() -> Result<()> {
         .downcast::<gst_app::AppSrc>().unwrap();
 
     sink_pipeline.set_state(gst::State::Playing)?;
-    println!(">>> Permanent V4L2 Sink Active on {} <<<", args.device);
+    println!("[SYSTEM] Permanent V4L2 device {} is now ACTIVE", args.device);
 
-    // --- 2. 恒定保活线程 ---
+    // --- 2. 注入线程 (保活与 FPS 统计) ---
     let state_clone = Arc::clone(&shared_state);
     let appsrc_clone = appsrc.clone();
     thread::spawn(move || {
         let mut timestamp = 0;
+        let mut last_log = Instant::now();
         loop {
             let sample = {
                 let s = state_clone.lock().unwrap();
@@ -63,18 +69,37 @@ fn main() -> Result<()> {
                     let mut new_map = b.map_writable().unwrap();
                     new_map.copy_from_slice(&map);
                 }
+                
+                // 设置对应的 CAPS，确保 appsrc 知道当前是横屏还是竖屏
+                if let Some(caps) = sample.caps() {
+                    appsrc_clone.set_caps(Some(caps));
+                }
+
                 let _ = appsrc_clone.push_buffer(new_buffer);
                 timestamp += 33_333_333;
             }
-            thread::sleep(Duration::from_millis(33));
+
+            if last_log.elapsed() >= Duration::from_secs(5) {
+                let count = {
+                    let mut s = state_clone.lock().unwrap();
+                    let c = s.frame_count;
+                    s.frame_count = 0;
+                    c
+                };
+                if count > 0 {
+                    println!("[VIDEO] Streaming at ~{} FPS", count / 5);
+                }
+                last_log = Instant::now();
+            }
+            thread::sleep(Duration::from_millis(32));
         }
     });
 
-    // --- 3. 极速重连 Source 循环 ---
+    // --- 3. 动态拉流循环 ---
     loop {
-        // 使用更短的 poll-timeout (500ms) 让重启更敏捷
+        println!("[NETWORK] Listening for Android SRT stream on port {}...", args.port);
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=500 ! tsdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=1000 ! tsdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false",
             args.port
         );
 
@@ -91,6 +116,7 @@ fn main() -> Result<()> {
                         let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
                         let mut s = state_input.lock().unwrap();
                         s.last_sample = Some(sample);
+                        s.frame_count += 1;
                         Ok(gst::FlowSuccess::Ok)
                     })
                     .build(),
@@ -103,18 +129,33 @@ fn main() -> Result<()> {
                 use gst::MessageView;
                 match msg.view() {
                     MessageView::Error(err) => {
-                        println!("Input Pipe Error: {}. Restarting listener...", err.error());
+                        println!("[NETWORK] SRT Disconnected: {}. Re-listening...", err.error());
                         break;
                     }
                     MessageView::Eos(..) => {
-                        println!("Input Pipe EOS. Restarting listener...");
+                        println!("[NETWORK] SRT Session Ended (EOS)");
                         break;
+                    }
+                    MessageView::StateChanged(s) if msg.src().map(|src| src.has_pipeline(&src_pipeline)).unwrap_or(false) => {
+                        if s.current() == gst::State::Playing {
+                            println!("[SYSTEM] >>> DATA FLOWING SUCCESSFULLY <<<");
+                        }
                     }
                     _ => (),
                 }
             }
             src_pipeline.set_state(gst::State::Null).unwrap();
         }
-        thread::sleep(Duration::from_millis(100)); // 极速重试
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+trait GstObjExt {
+    fn has_pipeline(&self, pipeline: &gst::Element) -> bool;
+}
+
+impl GstObjExt for gst::Object {
+    fn has_pipeline(&self, pipeline: &gst::Element) -> bool {
+        self.downcast_ref::<gst::Element>().map(|e| e == pipeline).unwrap_or(false)
     }
 }

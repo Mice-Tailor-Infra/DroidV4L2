@@ -2,6 +2,7 @@ package com.cagedbird.droidv4l2
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
@@ -49,31 +50,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        stopStreaming()
+    // 监听旋转，动态改变分辨率
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        Log.i(TAG, "[UI] Orientation changed, restarting stream for sync")
+        startStreaming()
     }
 
     private fun startStreaming() {
+        stopStreaming()
+        
+        // 动态计算分辨率：横屏 1280x720, 竖屏 720x1280
+        val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val width = if (isPortrait) 720 else 1280
+        val height = if (isPortrait) 1280 else 720
+        
+        Log.i(TAG, "[ENCODER] Initializing at ${width}x${height}")
+
         srtSender = SrtSender(targetHost, targetPort) {
+            Log.i(TAG, "[NETWORK] SRT Handshake OK, requesting IDR")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
         
-        videoEncoder = VideoEncoder(1280, 720, 2_000_000, 30) { data, ts, flags ->
+        videoEncoder = VideoEncoder(width, height, 2_500_000, 30) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
         
-        bindCamera()
+        bindCamera(width, height)
     }
 
-    private fun bindCamera() {
+    private fun bindCamera(width: Int, height: Int) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                .setResolutionStrategy(ResolutionStrategy(Size(width, height), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build()
 
             val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
@@ -86,8 +99,9 @@ class MainActivity : AppCompatActivity() {
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
+                Log.d(TAG, "[CAMERA] Bound successfully")
             } catch (exc: Exception) {
-                Log.e(TAG, "Camera bind failed", exc)
+                Log.e(TAG, "[CAMERA] Bind failed", exc)
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -100,6 +114,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onPause() {
+        super.onPause()
+        stopStreaming()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
