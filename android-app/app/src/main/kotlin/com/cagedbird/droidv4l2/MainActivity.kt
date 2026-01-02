@@ -3,6 +3,7 @@ package com.cagedbird.droidv4l2
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaFormat
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -41,6 +42,7 @@ class MainActivity : AppCompatActivity() {
         val editBitrate = findViewById<EditText>(R.id.editBitrate)
         val spinnerRes = findViewById<Spinner>(R.id.spinnerRes)
         val spinnerFps = findViewById<Spinner>(R.id.spinnerFps)
+        val spinnerCodec = findViewById<Spinner>(R.id.spinnerCodec)
 
         val resOptions = arrayOf("720p", "1080p", "480p")
         spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
@@ -50,6 +52,10 @@ class MainActivity : AppCompatActivity() {
         spinnerFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsOptions)
         spinnerFps.setSelection(fpsOptions.indexOf(prefs.getString("fps", "30")))
 
+        val codecOptions = arrayOf("H.264", "H.265")
+        spinnerCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecOptions)
+        spinnerCodec.setSelection(codecOptions.indexOf(prefs.getString("codec", "H.264")))
+
         editIp.setText(prefs.getString("ip", "10.0.0.17"))
         editBitrate.setText(prefs.getInt("bitrate", 10).toString())
 
@@ -58,6 +64,7 @@ class MainActivity : AppCompatActivity() {
                 .putInt("bitrate", editBitrate.text.toString().toIntOrNull() ?: 10)
                 .putString("res", spinnerRes.selectedItem.toString())
                 .putString("fps", spinnerFps.selectedItem.toString())
+                .putString("codec", spinnerCodec.selectedItem.toString())
                 .apply()
             
             Log.i(TAG, "[UI] Applying settings...")
@@ -81,11 +88,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun restartStreamingWithDelay() {
         stopStreaming()
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (5ms)..."
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (200ms)..."
         // 极限优化：5ms 延迟，瞬间恢复
         mainHandler.postDelayed({
             startStreaming()
-        }, 5)
+        }, 200)
     }
 
     private fun startStreaming() {
@@ -97,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         val bitrate = prefs.getInt("bitrate", 10)
         val resStr = prefs.getString("res", "720p")
         val fps = prefs.getString("fps", "30")?.toInt() ?: 30
+        val codecStr = prefs.getString("codec", "H.264")
 
         val (w, h) = when(resStr) {
             "1080p" -> 1920 to 1080
@@ -104,15 +112,19 @@ class MainActivity : AppCompatActivity() {
             else -> 1280 to 720
         }
 
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing..."
+        val isHevc = (codecStr == "H.265")
+        val mimeType = if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val port = if (isHevc) 5001 else 5000
 
-        videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps) { data, ts, flags ->
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing $codecStr on port $port..."
+
+        videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps, mimeType) { data, ts, flags ->
             srtSender?.send(data, ts, flags)
         }
         videoEncoder?.start()
 
-        srtSender = SrtSender(host, 5000) {
-            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED" }
+        srtSender = SrtSender(host, port, isHevc) {
+            runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED ($codecStr)" }
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()

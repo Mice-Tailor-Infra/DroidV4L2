@@ -14,6 +14,7 @@ class VideoEncoder(
     private val height: Int,
     private val bitRate: Int,
     private val frameRate: Int,
+    private val mimeType: String,
     private val onEncodedData: (ByteArray, Long, Int) -> Unit
 ) {
     private var mediaCodec: MediaCodec? = null
@@ -21,7 +22,7 @@ class VideoEncoder(
     private val encoderExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     fun start() {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+        val format = MediaFormat.createVideoFormat(mimeType, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
@@ -31,7 +32,7 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         }
 
-        mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+        mediaCodec = MediaCodec.createEncoderByType(mimeType).apply {
             setCallback(object : MediaCodec.Callback() {
                 override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {}
                 override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
