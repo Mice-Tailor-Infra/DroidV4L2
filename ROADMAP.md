@@ -12,9 +12,11 @@
 
 ### Multi-Protocol Expansion (The "Swiss Army Knife" Update)
 - [x] **Architectural Abstraction**: Introduced `VideoSender` interface to decouple UI from network logic.
-- [x] **RTSP Server Support**: Added `RtspServerSender` using `pedroSG94/RTSP-Server`.
-    - Compatible with VLC, OBS, Synology NAS, Home Assistant.
-    - Low-latency tuning for realtime monitoring.
+- [x] **RTSP Server Support (HEVC Ready)**:
+    - Replaced generic library with custom-built **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)** engine.
+    - **Native HEVC (H.265)** support via RFC 7798 implementation.
+    - Zero-latency UDP streaming with instant keyframe recovery.
+    - **Open Sourced**: Published as a standalone library `com.github.Mice-Tailor-Infra:TinyRtspKt`.
 
 ---
 

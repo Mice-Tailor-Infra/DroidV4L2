@@ -7,12 +7,12 @@
 *   **Ultra-Low Latency**: Optimized for <50ms glass-to-glass latency on 5GHz WiFi.
 *   **Multi-Protocol Support**: 
     *   **SRT (Caller)**: Pro-grade, low-latency streaming for the Linux Bridge.
-    *   **RTSP (Server)**: Universal mode. Turn your phone into an IP Camera for VLC/OBS/NVR.
+    *   **RTSP (Server)**: Universal mode powered by **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)**. Supports standard H.264 and H.265 (HEVC).
 *   **Always-On Screensaver**: Automatically displays professional SMPTE color bars when no client is connected, preventing V4L2 consumer errors.
 *   **Seamless Codec Switching**: Runtime H.264/H.265 switching via "Caps Lockdown" (no V4L2 freezes).
 *   **Dual Codec Support**:
     *   **H.264 (AVC)**: Maximum compatibility.
-    *   **H.265 (HEVC)**: Half the bandwidth for the same quality (requires hardware support).
+    *   **H.265 (HEVC)**: Half the bandwidth for the same quality.
 *   **Dynamic Resolution/FPS**: Switch between 480p/720p/1080p and 30/60 FPS on the fly.
 *   **Moonlight-Style UI**: Simple, effective settings panel on Android.
 
@@ -21,7 +21,10 @@
 ### Android App (Sender)
 *   **VideoSender Interface**: Decoupled network layer allowing easy protocol switching.
 *   **SRT Mode**: Uses `SrtClient` for pushed streams.
-*   **RTSP Mode**: Acts as an on-device server (Port 8554).
+*   **RTSP Mode**: Uses custom `TinyRtspKt` library.
+    - Zero-dependency implementation.
+    - Native HEVC RFC 7798 fragmentation (Type 49).
+    - UDP unicast with parameter set injection for instant recovery.
 *   **CameraX + MediaCodec**: Hardware-accelerated capturing and encoding (H.264/H.265).
 *   **Latency Tuning**: 1s GOP interval and low-latency priority flags.
 
@@ -57,6 +60,9 @@
 
 ## 🛠 Development History
 *   **Jan 2026**:
+    *   **Major Architecture Shift**: Migrated RTSP Server to **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)**.
+        - Solved H.265 "Illegal Temporal ID" issues.
+        - Implemented critical VPS/SPS/PPS injection.
     *   Stabilized 5ms reconnection latency.
     *   Fixed resolution switching using server-side `videoscale`.
     *   Added H.265 support via dual-port architecture.

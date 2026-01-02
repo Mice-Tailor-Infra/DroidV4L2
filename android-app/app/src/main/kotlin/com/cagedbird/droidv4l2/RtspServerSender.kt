@@ -2,9 +2,9 @@ package com.cagedbird.droidv4l2
 
 import android.media.MediaCodec
 import android.util.Log
-import com.cagedbird.droidv4l2.rtspserver.RtpPacketizer
-import com.cagedbird.droidv4l2.rtspserver.RtspSession
-import com.cagedbird.droidv4l2.rtspserver.TinyRtspServer
+import com.cagedbird.tinyrtsp.RtpPacketizer
+import com.cagedbird.tinyrtsp.RtspSession
+import com.cagedbird.tinyrtsp.TinyRtspServer
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.CopyOnWriteArrayList

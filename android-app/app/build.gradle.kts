@@ -53,4 +53,7 @@ dependencies {
 
     // RootEncoder (All-in-one Clients)
     implementation("com.github.pedroSG94.RootEncoder:library:2.6.1")
+
+    // Our own open source library!
+    implementation("com.github.Mice-Tailor-Infra:TinyRtspKt:v1.0.6")
 }
