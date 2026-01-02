@@ -5,7 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.pedro.common.ConnectChecker
-import com.pedro.rtspserver.RtspServer
+import com.pedro.rtspserver.server.RtspServer
 import com.pedro.common.VideoCodec
 import java.nio.ByteBuffer
 import java.net.Inet4Address
@@ -28,9 +28,7 @@ class RtspServerSender(
     private val localIp: String by lazy { getLocalIpAddress() ?: "0.0.0.0" }
 
     init {
-        // RtspServer doesn't have setVideoCodec in the same way, 
-        // usually it detects from SPS/PPS. But we should prepare it if possible.
-        // Looking at library docs, RtspServer handles track creation dynamically.
+        // RtspServer sets video codec dynamically based on stream info
     }
 
     override fun start() {
@@ -69,7 +67,7 @@ class RtspServerSender(
     }
 
     override fun getInfo(): String {
-        return "rtsp://$localIp:$port"
+        return "rtsp://$localIp:$port/live"
     }
     
     private fun getLocalIpAddress(): String? {
@@ -92,7 +90,6 @@ class RtspServerSender(
     }
 
     private fun parseConfigData(data: ByteArray) {
-        // Reusing the parser logic from SrtSender (should ideally be a utility)
         val indices = mutableListOf<Int>()
         for (i in 0 until data.size - 3) {
             if (data[i] == 0.toByte() && data[i+1] == 0.toByte() && 

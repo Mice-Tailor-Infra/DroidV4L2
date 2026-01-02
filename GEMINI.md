@@ -1,40 +1,36 @@
 # DroidV4L2: High-Performance Android to Linux Virtual Camera
 
-**DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux. It uses the **SRT (Secure Reliable Transport)** protocol to stream H.264/H.265 video directly into a V4L2 loopback device, making it compatible with any Linux application (OBS, Zoom, Chrome, etc.).
+**DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux. It supports multiple protocols including SRT for pro-grade Linux integration and RTSP for universal compatibility with players like VLC and OBS.
 
 ## 🌟 Key Features
 
 *   **Ultra-Low Latency**: Optimized for <50ms glass-to-glass latency on 5GHz WiFi.
+*   **Multi-Protocol Support**: 
+    *   **SRT (Caller)**: Pro-grade, low-latency streaming for the Linux Bridge.
+    *   **RTSP (Server)**: Universal mode. Turn your phone into an IP Camera for VLC/OBS/NVR.
 *   **Always-On Screensaver**: Automatically displays professional SMPTE color bars when no client is connected, preventing V4L2 consumer errors.
 *   **Seamless Codec Switching**: Runtime H.264/H.265 switching via "Caps Lockdown" (no V4L2 freezes).
 *   **Dual Codec Support**:
     *   **H.264 (AVC)**: Maximum compatibility.
     *   **H.265 (HEVC)**: Half the bandwidth for the same quality (requires hardware support).
 *   **Dynamic Resolution/FPS**: Switch between 480p/720p/1080p and 30/60 FPS on the fly.
-*   **Robust Connection**: Auto-reconnects instantly; handles network jitter gracefully.
 *   **Moonlight-Style UI**: Simple, effective settings panel on Android.
 
 ## 🏗 Architecture
 
 ### Android App (Sender)
-*   **CameraX**: Captures raw frames (YUV).
-*   **MediaCodec**: Hardware-accelerated encoding (H.264/H.265).
-*   **SRT Protocol**: Uses `pedroSG94/RootEncoder` for reliable UDP transport.
-*   **Logic**:
-    *   **SrtSender**: Manages connection lifecycle. Extracts VPS/SPS/PPS NAL units for H.265 handshakes.
-    *   **Latency Control**: Introduces a 200ms "tactical delay" on restart to sync with Linux receiver.
+*   **VideoSender Interface**: Decoupled network layer allowing easy protocol switching.
+*   **SRT Mode**: Uses `SrtClient` for pushed streams.
+*   **RTSP Mode**: Acts as an on-device server (Port 8554).
+*   **CameraX + MediaCodec**: Hardware-accelerated capturing and encoding (H.264/H.265).
+*   **Latency Tuning**: 1s GOP interval and low-latency priority flags.
 
 ### Linux Bridge (Receiver)
 *   **Rust + GStreamer**: High-performance pipeline management.
-*   **Dual-Port Listening**:
-    *   Port **5000**: Dedicated H.264 pipeline (`h264parse ! avdec_h264`).
-    *   Port **5001**: Dedicated H.265 pipeline (`h265parse ! avdec_h265`).
+*   **Dual-Port Listening**: Ports 5000 (H.264) and 5001 (H.265).
 *   **Pipeline Strategy**:
-    *   **Caps Lockdown**: Forces `appsrc` to a fixed format (I420 1080p). This deceives downstream consumers (like OBS), preventing pipeline negotiation freezes during codec changes.
+    *   **Caps Lockdown**: Forces `appsrc` to a fixed format (I420 1080p).
     *   **Screensaver Mode**: Uses a secondary `videotestsrc` pipeline to feed SMPTE bars when idle.
-    *   **Persistent Sink**: Keeps `/dev/video10` open.
-    *   **Dynamic Source**: Receives SRT stream, decodes, scales, and pushes to Sink.
-    *   **Watchdog**: Monitors data flow. If idle for >500ms, switches to screensaver mode.
 
 ## 🚀 Getting Started
 
