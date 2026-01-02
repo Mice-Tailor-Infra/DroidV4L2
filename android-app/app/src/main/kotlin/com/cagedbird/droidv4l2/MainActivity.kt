@@ -81,11 +81,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun restartStreamingWithDelay() {
         stopStreaming()
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (0.5s)..."
-        // 战术延迟 500ms，等待 Linux 端 poll-timeout (100ms) 触发并完成重启
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (5ms)..."
+        // 极限优化：5ms 延迟，瞬间恢复
         mainHandler.postDelayed({
             startStreaming()
-        }, 500)
+        }, 5)
     }
 
     private fun startStreaming() {
