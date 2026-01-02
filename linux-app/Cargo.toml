@@ -1,0 +1,12 @@
+[package]
+name = "droid-v4l2-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gstreamer = "0.21"
+gstreamer-video = "0.21"
+gstreamer-app = "0.21"
+anyhow = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
