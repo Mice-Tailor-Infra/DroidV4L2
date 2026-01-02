@@ -16,23 +16,21 @@ struct Args {
     device: String,
 }
 
-struct SharedState {
+struct BridgeState {
     last_sample: Option<gst::Sample>,
-    fps_counter: u32,
+    last_update: Instant,
+    appsrc: gst_app::AppSrc,
+    timestamp_ns: u64,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     gst::init().context("GStreamer init failed")?;
 
-    let shared_state = Arc::new(Mutex::new(SharedState { 
-        last_sample: None,
-        fps_counter: 0,
-    }));
-
-    // --- 1. 持久化输出端 (v4l2sink) ---
+    // --- 1. 建立持久输出管线 ---
+    // 使用 I420 作为桥接格式，它是 H.264 解码的原始输出，能减少一次转换开销
     let sink_pipeline_str = format!(
-        "appsrc name=mysrc is-live=true format=time ! videoconvert ! v4l2sink device={} sync=false",
+        "appsrc name=mysrc is-live=true format=time min-latency=0 ! videoconvert ! video/x-raw,format=YUY2 ! v4l2sink device={} sync=false",
         args.device
     );
     let sink_pipeline = gst::parse_launch(&sink_pipeline_str)?;
@@ -42,57 +40,36 @@ fn main() -> Result<()> {
         .downcast::<gst_app::AppSrc>().unwrap();
 
     sink_pipeline.set_state(gst::State::Playing)?;
-    println!("[SYSTEM] Permanent V4L2 Sink Active on {}", args.device);
+    println!("[SYSTEM] Permanent Sink Active on {}", args.device);
 
-    // --- 2. 帧注入与保活线程 ---
-    let state_clone = Arc::clone(&shared_state);
-    let appsrc_clone = appsrc.clone();
+    let state = Arc::new(Mutex::new(BridgeState {
+        last_sample: None,
+        last_update: Instant::now(),
+        appsrc: appsrc.clone(),
+        timestamp_ns: 0,
+    }));
+
+    // --- 2. 启动 Watchdog 线程 (保活专用) ---
+    // 只有在 100ms 没收到新帧时，才重复发送最后一帧
+    let state_watchdog = Arc::clone(&state);
     thread::spawn(move || {
-        let mut timestamp = 0;
-        let mut last_log = Instant::now();
         loop {
-            let sample = {
-                let s = state_clone.lock().unwrap();
-                s.last_sample.clone()
-            };
-
-            if let Some(sample) = sample {
-                // 动态同步分辨率 (Caps)
-                if let Some(caps) = sample.caps() {
-                    appsrc_clone.set_caps(Some(&caps.to_owned()));
+            thread::sleep(Duration::from_millis(33));
+            let mut s = state_watchdog.lock().unwrap();
+            if s.last_update.elapsed() > Duration::from_millis(100) {
+                if let Some(sample) = s.last_sample.clone() {
+                    push_sample_to_appsrc(&mut s, sample);
                 }
-
-                let buffer = sample.buffer().unwrap();
-                let mut new_buffer = gst::Buffer::with_size(buffer.size()).unwrap();
-                {
-                    let b = new_buffer.get_mut().unwrap();
-                    b.set_pts(gst::ClockTime::from_nseconds(timestamp));
-                    b.set_duration(gst::ClockTime::from_nseconds(33_333_333));
-                    let map = buffer.map_readable().unwrap();
-                    let mut new_map = b.map_writable().unwrap();
-                    new_map.copy_from_slice(&map);
-                }
-                let _ = appsrc_clone.push_buffer(new_buffer);
-                timestamp += 33_333_333;
             }
-
-            if last_log.elapsed() >= Duration::from_secs(2) {
-                let mut s = state_clone.lock().unwrap();
-                if s.fps_counter > 0 {
-                    println!("[VIDEO] Status: Streaming Active ({} fps)", s.fps_counter / 2);
-                    s.fps_counter = 0;
-                }
-                last_log = Instant::now();
-            }
-            thread::sleep(Duration::from_millis(32));
         }
     });
 
-    // --- 3. 拉流循环 ---
+    // --- 3. 动态拉流 Source 循环 ---
     loop {
-        println!("[NETWORK] Waiting for Android SRT on port {}...", args.port);
+        println!("[NETWORK] Waiting for Android stream on port {}...", args.port);
+        // 增加解码器线程数，开启低延迟属性
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=1000 ! tsdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live ! tsdemux ! h264parse ! avdec_h264 max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
             args.port
         );
 
@@ -101,32 +78,52 @@ fn main() -> Result<()> {
                 .by_name("mysink").unwrap()
                 .downcast::<gst_app::AppSink>().unwrap();
 
-            let state_input = Arc::clone(&shared_state);
+            let state_input = Arc::clone(&state);
             appsink.set_callbacks(
                 gst_app::AppSinkCallbacks::builder()
                     .new_sample(move |sink| {
                         let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
                         let mut s = state_input.lock().unwrap();
-                        s.last_sample = Some(sample);
-                        s.fps_counter += 1;
+                        s.last_sample = Some(sample.clone());
+                        s.last_update = Instant::now();
+                        // 收到立刻注入，实现零等待转发
+                        push_sample_to_appsrc(&mut s, sample);
                         Ok(gst::FlowSuccess::Ok)
                     })
                     .build()
             );
 
             src_pipe.set_state(gst::State::Playing).unwrap();
-            
             let bus = src_pipe.bus().unwrap();
             for msg in bus.iter_timed(gst::ClockTime::NONE) {
                 use gst::MessageView;
                 match msg.view() {
-                    MessageView::Error(e) => { println!("[NETWORK] Lost connection: {}", e.error()); break; }
-                    MessageView::Eos(..) => { println!("[NETWORK] Stream ended (EOS)"); break; }
+                    MessageView::Error(_) | MessageView::Eos(..) => break,
                     _ => (),
                 }
             }
-            let _ = src_pipe.set_state(gst::State::Null);
+            src_pipe.set_state(gst::State::Null).unwrap();
         }
         thread::sleep(Duration::from_millis(500));
+    }
+}
+
+// 辅助函数：将 Sample 注入 appsrc 并对齐 Caps
+fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample) {
+    if let Some(caps) = sample.caps() {
+        s.appsrc.set_caps(Some(&caps.to_owned()));
+    }
+    if let Some(buffer) = sample.buffer() {
+        let mut new_buffer = gst::Buffer::with_size(buffer.size()).unwrap();
+        {
+            let b = new_buffer.get_mut().unwrap();
+            b.set_pts(gst::ClockTime::from_nseconds(s.timestamp_ns));
+            b.set_duration(gst::ClockTime::from_nseconds(33_333_333));
+            let map = buffer.map_readable().unwrap();
+            let mut new_map = b.map_writable().unwrap();
+            new_map.copy_from_slice(&map);
+        }
+        let _ = s.appsrc.push_buffer(new_buffer);
+        s.timestamp_ns += 33_333_333;
     }
 }

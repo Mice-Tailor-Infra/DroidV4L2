@@ -55,15 +55,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startHeartbeat() {
-        Log.i(TAG, "[SYSTEM] Starting SRT Heartbeat...")
         srtSender = SrtSender(targetHost, targetPort) {
-            // 这就是心跳通了之后的回调
-            Log.i(TAG, "[SYSTEM] Connection established! Activating stream...")
             videoEncoder?.requestKeyFrame()
         }
         srtSender?.start()
-        
-        // 相机和编码器先初始化好，但 SRT 会在底层过滤数据直到连通
         bindCamera()
     }
 
@@ -71,7 +66,6 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            
             val resSelector = ResolutionSelector.Builder()
                 .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                 .build()
@@ -82,27 +76,24 @@ class MainActivity : AppCompatActivity() {
             encoderPreview.setSurfaceProvider { request ->
                 val res = request.resolution
                 videoEncoder?.stop()
-                videoEncoder = VideoEncoder(res.width, res.height, 2_000_000, 30) { data, ts, flags ->
+                // 码率提高到 10Mbps 以利用 Wi-Fi 6 优势
+                videoEncoder = VideoEncoder(res.width, res.height, 10_000_000, 30) { data, ts, flags ->
                     srtSender?.send(data, ts, flags)
                 }
                 videoEncoder?.start()
-                
-                videoEncoder?.getInputSurface()?.let { surface ->
-                    request.provideSurface(surface, cameraExecutor) { }
-                }
+                videoEncoder?.getInputSurface()?.let { surface -> request.provideSurface(surface, cameraExecutor) { } }
             }
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
             } catch (exc: Exception) {
-                Log.e(TAG, "[CAMERA] Bind error", exc)
+                Log.e(TAG, "Bind failed", exc)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun stopEverything() {
-        Log.i(TAG, "[SYSTEM] Stopping all services")
         srtSender?.stop()
         videoEncoder?.stop()
         srtSender = null
