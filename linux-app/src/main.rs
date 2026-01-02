@@ -36,11 +36,10 @@ fn main() -> Result<()> {
     check_plugin("avdec_h264");
     check_plugin("h265parse");
     check_plugin("avdec_h265");
+    check_plugin("videotestsrc"); // 检查屏保插件
     std::io::stdout().flush().unwrap();
 
     // --- 1. 持久 Sink 管线 (Caps Lockdown) ---
-    // 关键点：appsrc 的 caps 必须被死死锁定，不允许有任何模糊。
-    // 我们强制要求上游必须送来 I420 1080p 30fps。
     let sink_pipeline_str = format!(
         "appsrc name=mysrc is-live=true format=time min-latency=0 caps=\"video/x-raw,format=I420,width=1920,height=1080,framerate=30/1,pixel-aspect-ratio=1/1\" ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080 ! v4l2sink device={} sync=false",
         args.device
@@ -54,6 +53,18 @@ fn main() -> Result<()> {
     sink_pipeline.set_state(gst::State::Playing)?;
     println!("[SYSTEM] Permanent Sink Active on {} (Caps Locked)", args.device);
 
+    // --- 2. 屏保发生器 (Screensaver Generator) ---
+    // 产生标准的 SMPTE 彩条，格式完全匹配 Locked Caps
+    let saver_pipeline_str = "videotestsrc pattern=smpte ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=saver sync=false drop=true max-buffers=1";
+    let saver_pipeline = gst::parse_launch(saver_pipeline_str)?;
+    let saver_appsink = saver_pipeline
+        .downcast_ref::<gst::Bin>().unwrap()
+        .by_name("saver").unwrap()
+        .downcast::<gst_app::AppSink>().unwrap();
+    
+    saver_pipeline.set_state(gst::State::Playing)?;
+    println!("[SYSTEM] Screensaver Generator Active (SMPTE Bars)");
+
     let state = Arc::new(Mutex::new(BridgeState {
         last_sample: None,
         last_update: Instant::now(),
@@ -62,21 +73,38 @@ fn main() -> Result<()> {
         active_codec: "none".to_string(),
     }));
 
-    // --- 2. Watchdog 线程 (保活与清理) ---
+    // --- 3. Watchdog 线程 (保活、清理、屏保) ---
     let state_watchdog = Arc::clone(&state);
     thread::spawn(move || {
         loop {
+            // 30fps = 33ms
             thread::sleep(Duration::from_millis(33));
             let mut s = state_watchdog.lock().unwrap();
             let elapsed = s.last_update.elapsed();
             
             if elapsed > Duration::from_millis(500) {
+                // 状态：IDLE (无连接)
+                // 动作：清理残留状态 + 播放屏保
                 if s.last_sample.is_some() {
-                    println!("[WATCHDOG] Stream idle for 500ms. Clearing buffer.");
+                    // println!("[WATCHDOG] Stream lost. Switching to screensaver.");
                     s.last_sample = None;
                     s.active_codec = "none".to_string();
                 }
+
+                // 从屏保管线拉取一帧
+                match saver_appsink.pull_sample() {
+                    Ok(sample) => {
+                        // 推送屏保帧到主管线，保持 V4L2 存活
+                        push_sample_to_appsrc(&mut s, sample, true);
+                    },
+                    Err(_) => {
+                        // 屏保管线如果挂了，我们也无能为力，但这通常不可能发生
+                    }
+                }
+
             } else if elapsed > Duration::from_millis(200) {
+                // 状态：JITTER (网络抖动)
+                // 动作：补发上一帧 (Packet Loss Concealment)
                 if let Some(sample) = s.last_sample.clone() {
                     if s.active_codec != "none" {
                         push_sample_to_appsrc(&mut s, sample, true);
@@ -86,7 +114,7 @@ fn main() -> Result<()> {
         }
     });
 
-    // --- 3. 启动双路监听 ---
+    // --- 4. 启动双路监听 ---
     let state_h264 = Arc::clone(&state);
     let port_h264 = args.port_h264;
     let h264_thread = thread::spawn(move || {
@@ -122,8 +150,7 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
             "h265parse ! avdec_h265"
         };
 
-        // 关键改动：无论解码出来是什么鬼样子，都强制 Scale + Convert 成 I420 1080p
-        // 这确保了 appsink 收到的数据与 appsrc 要求的格式完美匹配。
+        // 强制 Scale + Convert 成 I420 1080p
         let src_pipeline_str = format!(
             "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
             port, parser_decoder
@@ -183,10 +210,7 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
 }
 
 fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample, _is_keepalive: bool) {
-    // 禁术：Caps Lockdown
-    // 我们不再调用 s.appsrc.set_caps()。因为我们假设上游已经把格式洗得很干净了。
-    // 这骗过了下游，让它以为格式从未改变。
-    
+    // Caps Lockdown: 绝不调用 set_caps
     if let Some(buffer) = sample.buffer() {
         let mut new_buffer = gst::Buffer::with_size(buffer.size()).unwrap();
         {
