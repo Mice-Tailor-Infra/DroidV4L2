@@ -5,6 +5,7 @@
 ## 🌟 Key Features
 
 *   **Ultra-Low Latency**: Optimized for <50ms glass-to-glass latency on 5GHz WiFi.
+*   **Seamless Codec Switching**: Runtime H.264/H.265 switching via "Caps Lockdown" (no V4L2 freezes).
 *   **Dual Codec Support**:
     *   **H.264 (AVC)**: Maximum compatibility.
     *   **H.265 (HEVC)**: Half the bandwidth for the same quality (requires hardware support).
@@ -28,9 +29,10 @@
     *   Port **5000**: Dedicated H.264 pipeline (`h264parse ! avdec_h264`).
     *   Port **5001**: Dedicated H.265 pipeline (`h265parse ! avdec_h265`).
 *   **Pipeline Strategy**:
-    *   **Persistent Sink**: Keeps `/dev/video10` open and scaled to fixed 1080p (`videoscale`).
-    *   **Dynamic Source**: Receives SRT stream, decodes to raw I420, and pushes to Sink.
-    *   **Watchdog**: Monitors data flow. If idle for >500ms, clears buffers to allow clean codec switching.
+    *   **Caps Lockdown**: Forces `appsrc` to a fixed format (I420 1080p). This deceives downstream consumers (like OBS), preventing pipeline negotiation freezes during codec changes.
+    *   **Persistent Sink**: Keeps `/dev/video10` open.
+    *   **Dynamic Source**: Receives SRT stream, decodes, scales, and pushes to Sink.
+    *   **Watchdog**: Monitors data flow. If idle for >500ms, clears buffers.
 
 ## 🚀 Getting Started
 
@@ -55,17 +57,12 @@
     *   Select Resolution/FPS/Codec.
     *   Click **Apply Settings**.
 
-## ⚠️ Known Issues
-
-*   **Hot-Switching Freeze**: Switching between H.264 and H.265 while a consumer (e.g., `ffplay`, OBS) is **actively reading** the video device will cause the image to freeze.
-    *   **Workaround**: Close the consumer application (stop preview), switch codec on Android, wait for connection, then re-open the consumer.
-    *   *Technical Reason*: V4L2 locks the format negotiation when the device is open. Switching codecs changes the internal decoder pipeline state too drastically for the running `v4l2sink` to handle gracefully without a restart.
-
 ## 🛠 Development History
 *   **Jan 2026**:
     *   Stabilized 5ms reconnection latency.
     *   Fixed resolution switching using server-side `videoscale`.
     *   Added H.265 support via dual-port architecture.
+    *   **Major Breakthrough**: Implemented "Caps Lockdown" to enable seamless runtime codec switching.
     *   Implemented intelligent Watchdog to prevent caps thrashing.
 
 ---
