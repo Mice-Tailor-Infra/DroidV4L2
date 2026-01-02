@@ -24,7 +24,7 @@ struct BridgeState {
     last_update: Instant,
     appsrc: gst_app::AppSrc,
     timestamp_ns: u64,
-    active_codec: String, // 记录当前活跃的编码格式
+    active_codec: String,
 }
 
 fn main() -> Result<()> {
@@ -38,10 +38,11 @@ fn main() -> Result<()> {
     check_plugin("avdec_h265");
     std::io::stdout().flush().unwrap();
 
-    // --- 1. 持久 Sink 管线 ---
-    // 强制输出 1080p
+    // --- 1. 持久 Sink 管线 (Caps Lockdown) ---
+    // 关键点：appsrc 的 caps 必须被死死锁定，不允许有任何模糊。
+    // 我们强制要求上游必须送来 I420 1080p 30fps。
     let sink_pipeline_str = format!(
-        "appsrc name=mysrc is-live=true format=time min-latency=0 ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080 ! v4l2sink device={} sync=false",
+        "appsrc name=mysrc is-live=true format=time min-latency=0 caps=\"video/x-raw,format=I420,width=1920,height=1080,framerate=30/1,pixel-aspect-ratio=1/1\" ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080 ! v4l2sink device={} sync=false",
         args.device
     );
     let sink_pipeline = gst::parse_launch(&sink_pipeline_str)?;
@@ -51,7 +52,7 @@ fn main() -> Result<()> {
         .downcast::<gst_app::AppSrc>().unwrap();
 
     sink_pipeline.set_state(gst::State::Playing)?;
-    println!("[SYSTEM] Permanent Sink Active on {}", args.device);
+    println!("[SYSTEM] Permanent Sink Active on {} (Caps Locked)", args.device);
 
     let state = Arc::new(Mutex::new(BridgeState {
         last_sample: None,
@@ -69,22 +70,14 @@ fn main() -> Result<()> {
             let mut s = state_watchdog.lock().unwrap();
             let elapsed = s.last_update.elapsed();
             
-            // 策略：
-            // < 200ms: 正常接收，无需补帧
-            // 200ms - 500ms: 网络抖动，补发上一帧 (保活)
-            // > 500ms: 认为连接已断开，停止补发，清除 last_sample。
-            //          这一步至关重要！它确保了当我们切换 Codec 时，Watchdog 不会继续
-            //          向管线灌入旧 Codec 的脏数据，从而允许新 Codec 顺利接管。
-            
             if elapsed > Duration::from_millis(500) {
                 if s.last_sample.is_some() {
-                    println!("[WATCHDOG] Stream idle for 500ms. Clearing buffer to allow codec switch.");
-                    s.last_sample = None; // 清除缓存，停止发送
+                    println!("[WATCHDOG] Stream idle for 500ms. Clearing buffer.");
+                    s.last_sample = None;
                     s.active_codec = "none".to_string();
                 }
             } else if elapsed > Duration::from_millis(200) {
                 if let Some(sample) = s.last_sample.clone() {
-                    // 只有在 active_codec 有效时才补发
                     if s.active_codec != "none" {
                         push_sample_to_appsrc(&mut s, sample, true);
                     }
@@ -123,16 +116,16 @@ fn check_plugin(name: &str) {
 fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
     println!("[THREAD] Starting {} loop on port {}", codec, port);
     loop {
-        // 显式构建管线
         let parser_decoder = if codec == "h264" {
             "h264parse ! avdec_h264"
         } else {
             "h265parse ! avdec_h265"
         };
 
-        // 确保输出 I420，最大限度保证兼容性
+        // 关键改动：无论解码出来是什么鬼样子，都强制 Scale + Convert 成 I420 1080p
+        // 这确保了 appsink 收到的数据与 appsrc 要求的格式完美匹配。
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoconvert ! video/x-raw,format=I420 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
             port, parser_decoder
         );
 
@@ -152,7 +145,6 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
                             let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
                             let mut s = state_input.lock().unwrap();
                             
-                            // 检测 Codec 切换
                             if s.active_codec != codec_name {
                                 println!("[SWITCH] Codec changed: {} -> {}", s.active_codec, codec_name);
                                 s.active_codec = codec_name.clone();
@@ -190,14 +182,11 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
     }
 }
 
-fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample, is_keepalive: bool) {
-    if let Some(caps) = sample.caps() {
-        // 可以在这里加日志打印 Caps 变化
-        if !is_keepalive {
-            // println!("[CAPS] Incoming: {}", caps);
-        }
-        s.appsrc.set_caps(Some(&caps.to_owned()));
-    }
+fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample, _is_keepalive: bool) {
+    // 禁术：Caps Lockdown
+    // 我们不再调用 s.appsrc.set_caps()。因为我们假设上游已经把格式洗得很干净了。
+    // 这骗过了下游，让它以为格式从未改变。
+    
     if let Some(buffer) = sample.buffer() {
         let mut new_buffer = gst::Buffer::with_size(buffer.size()).unwrap();
         {
