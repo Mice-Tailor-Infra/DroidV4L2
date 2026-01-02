@@ -10,9 +10,8 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
     private val TAG = "SrtSender"
     private val srtClient = SrtClient(this)
     
-    // 缓存 SPS/PPS，防止在连接建立前丢失
-    private var cachedSps: ByteBuffer? = null
-    private var cachedPps: ByteBuffer? = null
+    private var cachedSps: ByteArray? = null
+    private var cachedPps: ByteArray? = null
 
     fun start() {
         if (!srtClient.isStreaming) {
@@ -32,11 +31,8 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
         }
 
         if ((flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-            Log.i(TAG, "Caching SPS/PPS")
             cacheSpsPps(data)
-            if (srtClient.isStreaming) {
-                sendConfig()
-            }
+            if (srtClient.isStreaming) sendConfigPackets()
         } else {
             if (srtClient.isStreaming) {
                 srtClient.sendVideo(buffer, info)
@@ -54,16 +50,28 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
             }
         }
         if (ppsIndex != -1) {
-            cachedSps = ByteBuffer.allocateDirect(ppsIndex).apply { put(data, 0, ppsIndex); rewind() }
-            cachedPps = ByteBuffer.allocateDirect(data.size - ppsIndex).apply { put(data, ppsIndex, data.size - ppsIndex); rewind() }
+            cachedSps = data.copyOfRange(0, ppsIndex)
+            cachedPps = data.copyOfRange(ppsIndex, data.size)
         }
     }
 
-    private fun sendConfig() {
+    private fun sendConfigPackets() {
         val sps = cachedSps ?: return
         val pps = cachedPps ?: return
-        Log.i(TAG, "Sending cached SPS/PPS to SRT")
-        srtClient.setVideoInfo(sps, pps, null)
+        
+        Log.i(TAG, "Force sync SPS/PPS")
+        srtClient.setVideoInfo(ByteBuffer.wrap(sps), ByteBuffer.wrap(pps), null)
+        
+        val dummyInfo = MediaCodec.BufferInfo().apply {
+            offset = 0
+            presentationTimeUs = System.nanoTime() / 1000
+            flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG
+        }
+        
+        dummyInfo.size = sps.size
+        srtClient.sendVideo(ByteBuffer.wrap(sps), dummyInfo)
+        dummyInfo.size = pps.size
+        srtClient.sendVideo(ByteBuffer.wrap(pps), dummyInfo)
     }
 
     fun stop() {
@@ -72,11 +80,10 @@ class SrtSender(private val host: String, private val port: Int) : ConnectChecke
 
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
-        Log.i(TAG, "SRT SUCCESS - Sending headers")
-        // 连接成功，立刻补发配置信息
-        sendConfig()
+        Log.i(TAG, "RECONNECTED - Syncing...")
+        sendConfigPackets()
     }
-    override fun onConnectionFailed(reason: String) { Log.e(TAG, "SRT FAILED: $reason") }
+    override fun onConnectionFailed(reason: String) {}
     override fun onNewBitrate(bitrate: Long) {}
     override fun onDisconnect() {}
     override fun onAuthError() {}
