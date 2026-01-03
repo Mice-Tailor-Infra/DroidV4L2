@@ -28,8 +28,7 @@ class WebServer(private val context: Context, port: Int) : NanoHTTPD(port) {
         Log.d(TAG, "Request: $method $uri")
 
         return when {
-            uri == "/" -> serveIndexHtml()
-            uri == "/stream" -> serveMjpegStream()
+            uri == "/" || uri == "/stream" -> serveMjpegStream()
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
         }
     }
@@ -103,22 +102,6 @@ class WebServer(private val context: Context, port: Int) : NanoHTTPD(port) {
                     Response.Status.INTERNAL_ERROR,
                     MIME_PLAINTEXT,
                     "Error starting stream"
-            )
-        }
-    }
-
-    private fun serveIndexHtml(): Response {
-        // Simple MJPEG viewer if stream requested
-        // TODO: Update index.html to support MJPEG mode or separate page
-        return try {
-            val inputStream = context.assets.open("index.html")
-            val html = inputStream.bufferedReader().use { it.readText() }
-            newFixedLengthResponse(Response.Status.OK, MIME_HTML, html)
-        } catch (e: IOException) {
-            newFixedLengthResponse(
-                    Response.Status.INTERNAL_ERROR,
-                    MIME_PLAINTEXT,
-                    "Internal Error: index.html not found"
             )
         }
     }
