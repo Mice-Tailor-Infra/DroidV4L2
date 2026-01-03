@@ -230,8 +230,9 @@ fn run_mjpeg_loop(url: &str, state: Arc<Mutex<BridgeState>>) {
     loop {
         // Pipeline: curl/souphttpsrc -> multipartdemux -> jpegdec -> scale/convert -> appsink
         // Using souphttpsrc for better HTTP support
+        // use add-borders=true to prevent "Wide Putin" stretching for portrait video
         let pipeline_str = format!(
-            "souphttpsrc location={} is-live=true do-timestamp=true keep-alive=true ! multipartdemux ! jpegdec ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "souphttpsrc location={} is-live=true do-timestamp=true keep-alive=true ! multipartdemux ! jpegdec ! videoconvert ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
             url
         );
 
