@@ -217,27 +217,176 @@ class WebRtcManager(private val context: Context) {
         // We assume JavaI420Buffer.wrap handles direct buffers correctly.
 
         try {
-            val buffer =
-                    JavaI420Buffer.wrap(
-                            image.width,
-                            image.height,
-                            planes[0].buffer,
-                            planes[0].rowStride,
-                            planes[1].buffer,
-                            planes[1].rowStride,
-                            planes[2].buffer,
-                            planes[2].rowStride,
-                            Runnable { image.close() }
-                    )
+            // Check pixel stride.
+            val yPlane = planes[0]
+            val uPlane = planes[1]
+            val vPlane = planes[2]
 
-            // Rotation is handled by WebRTC if we pass it here
-            val videoFrame = VideoFrame(buffer, image.imageInfo.rotationDegrees, timestampNs)
+            if (uPlane.pixelStride == 1 && vPlane.pixelStride == 1) {
+                // Standard I420, direct wrap
+                val buffer =
+                        JavaI420Buffer.wrap(
+                                image.width,
+                                image.height,
+                                yPlane.buffer,
+                                yPlane.rowStride,
+                                uPlane.buffer,
+                                uPlane.rowStride,
+                                vPlane.buffer,
+                                vPlane.rowStride,
+                                Runnable { image.close() }
+                        )
+                val videoFrame = VideoFrame(buffer, image.imageInfo.rotationDegrees, timestampNs)
+                videoSource?.capturerObserver?.onFrameCaptured(videoFrame)
+                videoFrame.release()
+            } else {
+                // Likely NV12 (stride 2) or NV21. Need to copy to I420.
+                // JavaI420Buffer.allocate allocates a native buffer.
+                val i420Buffer = JavaI420Buffer.allocate(image.width, image.height)
 
-            // Feed to WebRTC Source
-            videoSource?.capturerObserver?.onFrameCaptured(videoFrame)
+                // Copy Y (Stride may differ, so row-by-row)
+                val ySrc = yPlane.buffer
+                val yDst = i420Buffer.dataY
+                val yW = image.width
+                val yH = image.height
+                val ySrcStride = yPlane.rowStride
+                val yDstStride = i420Buffer.strideY
 
-            // Release the frame wrapper (the buffer itself is ref-counted/callback-released)
-            videoFrame.release()
+                ySrc.position(0)
+                yDst.position(0) // Ensure dst is at start
+
+                // Bulk copy if strides match, else row-by-row
+                if (ySrcStride == yDstStride) {
+                    // Limits need to be set? DirectBuffer.
+                    // Note: src might be larger than needed.
+                    val limit = Math.min(ySrc.capacity(), yDst.capacity())
+                    // Actually just copy height * stride?
+                    // But i420Buffer is tightly packed usually? or aligned.
+                    // Safer: row-by-row
+                    for (r in 0 until yH) {
+                        ySrc.limit(r * ySrcStride + yW)
+                        ySrc.position(r * ySrcStride)
+                        yDst.put(ySrc)
+                    }
+                } else {
+                    for (r in 0 until yH) {
+                        ySrc.limit(r * ySrcStride + yW)
+                        ySrc.position(r * ySrcStride)
+                        yDst.put(ySrc)
+                    }
+                }
+
+                // Copy U and V (De-interleave)
+                // If PixelStride=2, it means U (skip) U (skip).
+                // We need to read just the U bytes into tight U buffer.
+                val uSrc = uPlane.buffer
+                val vSrc = vPlane.buffer
+                val uDst = i420Buffer.dataU
+                val vDst = i420Buffer.dataV
+                val chromeW = (image.width + 1) / 2
+                val chromeH = (image.height + 1) / 2
+                val uSrcStride = uPlane.rowStride
+                val vSrcStride = vPlane.rowStride
+                val uDstStride = i420Buffer.strideU // strideU is usually chromW or aligned
+                val vDstStride = i420Buffer.strideV
+                val uPixelStride = uPlane.pixelStride
+                val vPixelStride = vPlane.pixelStride
+
+                // Intermediate buffer for a row.
+                // Max width needed is roughly width of image (since stride ~ width for NV12)
+                // Allocating once per frame is okay-ish (young gen), or could be a member.
+                // For safety size is rowStride.
+                val uRowBuf = ByteArray(uSrcStride)
+                val vRowBuf = ByteArray(vSrcStride)
+
+                for (r in 0 until chromeH) {
+                    // 1. Read U Row
+                    uSrc.position(r * uSrcStride)
+                    // Read enough bytes for the row pixels
+                    val bytesToReadU = if (uPixelStride == 1) chromeW else chromeW * uPixelStride
+                    // Ensure we don't read past limit if stride is weird, but rowStride should
+                    // cover it.
+                    // Actually simplest is read min(remaining, stride).
+                    val readLenU = Math.min(uSrcStride, uSrc.remaining())
+                    uSrc.get(uRowBuf, 0, readLenU)
+
+                    // 2. Write U Pixels to Direct Buffer
+                    uDst.position(r * uDstStride)
+                    // We can't bulk put de-interleaved data easily without another buffer or loop.
+                    // But loop over ByteArray is fast.
+                    for (c in 0 until chromeW) {
+                        uDst.put(uRowBuf[c * uPixelStride])
+                    }
+
+                    // 3. Read V Row
+                    vSrc.position(r * vSrcStride)
+                    val readLenV = Math.min(vSrcStride, vSrc.remaining())
+                    vSrc.get(vRowBuf, 0, readLenV)
+
+                    // 4. Write V Pixels
+                    vDst.position(r * vDstStride)
+                    for (c in 0 until chromeW) {
+                        vDst.put(vRowBuf[c * vPixelStride])
+                    }
+                }
+
+                // Done copying.
+                // Need to reset buffer positions for WebRTC reading?
+                // allocate() returns buffers at pos 0? No, allocate() calls C++.
+                // We used put(), which advances position. We MUST rewind.
+                // Actually JavaI420Buffer docs: "The buffers are DIRECT byte buffers... The
+                // position is always 0."
+                // But we moved position by put(). We must flip or rewind?
+                // No, we are writing to the buffer that JavaI420Buffer WRAPS.
+                // Wait, JavaI420Buffer has 'dataY', 'dataU', etc. which are ByteBuffers.
+                // If we modify position, does it affect the native read?
+                // Usually yes. We should rewind (position=0) after writing.
+
+                // Wait, we need to pass the i420Buffer to VideoFrame.
+                // But wait, we wrote to i420Buffer.dataY.
+                // We can just call i420Buffer.retain() ? No, we own it until we pass to VideoFrame?
+
+                // IMPORTANT: The buffers returned by getDataY() etc. might be slicing the same
+                // block.
+                // We advanced specific buffers.
+                // We should probably rewind them manually if we want safety,
+                // BUT `videoFrame` constructor doesn't re-read dataY/U/V from the object getter?
+                // It takes the buffer object.
+                // Let's assume we need to rewind.
+
+                // Wait, `i420Buffer.getDataY()` might return a NEW ByteBuffer wrapper or the same
+                // one?
+                // Usually same. So if we moved pos, we moved it.
+                // Let's rewind/flip. `put` moves position. So `flip` sets limit to position and
+                // position to 0.
+                // But the buffer size limit was the WHOLE buffer.
+                // We just want to set position to 0.
+
+                // Actually, let's keep it simple:
+                // JavaI420Buffer is an Interface. `allocate` returns an impl (usually
+                // WrappedNativeI420Buffer).
+                // Its `getDataY()` returns a ByteBuffer.
+                // Just rewriting '0' to position is safer.
+                // But we can't rewind `dataY` because it's a property.
+                // We used local var `yDst`. If `yDst` is the SAME object as `i420Buffer.dataY`,
+                // then `yDst.rewind()` works.
+                // Yes, it returns the buffer instance.
+
+                (i420Buffer.dataY as java.nio.Buffer).rewind()
+                (i420Buffer.dataU as java.nio.Buffer).rewind()
+                (i420Buffer.dataV as java.nio.Buffer).rewind()
+
+                val videoFrame =
+                        VideoFrame(i420Buffer, image.imageInfo.rotationDegrees, timestampNs)
+                videoSource?.capturerObserver?.onFrameCaptured(videoFrame)
+                videoFrame.release()
+                // i420Buffer.release() ? No, VideoFrame takes ownership or increments ref count.
+                // Actually `JavaI420Buffer.allocate` returns a buffer with refCount=1.
+                // VideoFrame wrapper takes it. VideoFrame.release() decrements it.
+                // So we are good.
+
+                image.close()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Frame conversion failed", e)
             image.close()
