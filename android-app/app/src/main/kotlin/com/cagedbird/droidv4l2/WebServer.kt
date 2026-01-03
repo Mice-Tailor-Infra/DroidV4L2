@@ -54,7 +54,7 @@ class WebServer(private val context: Context, port: Int) : NanoHTTPD(port) {
                             while (true) {
                                 var jpeg: ByteArray?
                                 synchronized(frameLock) {
-                                    frameLock.wait(1000) // Wait for new frame
+                                    frameLock.wait() // Wait indefinitely for new frame
                                     jpeg = latestJpeg
                                 }
 
