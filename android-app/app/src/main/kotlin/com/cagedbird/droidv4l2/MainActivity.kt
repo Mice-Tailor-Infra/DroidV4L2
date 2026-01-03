@@ -1,33 +1,43 @@
 package com.cagedbird.droidv4l2
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.media.MediaFormat
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.util.Log
-import android.util.Size
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "DroidV4L2"
-    private lateinit var cameraExecutor: ExecutorService
+
+    // Service Binding
+    private var streamingService: StreamingService? = null
+    private var isBound = false
+    private val connection =
+            object : ServiceConnection {
+                override fun onServiceConnected(className: ComponentName, service: IBinder) {
+                    val binder = service as StreamingService.LocalBinder
+                    streamingService = binder.getService()
+                    isBound = true
+                    streamingService?.attachPreview(viewFinder)
+                }
+                override fun onServiceDisconnected(arg0: ComponentName) {
+                    isBound = false
+                    streamingService = null
+                }
+            }
+
     private var viewFinder: PreviewView? = null
-    private var videoEncoder: VideoEncoder? = null
-    private var videoSender: VideoSender? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +45,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         viewFinder = findViewById(R.id.viewFinder)
-        cameraExecutor = Executors.newSingleThreadExecutor()
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val editIp = findViewById<EditText>(R.id.editIp)
@@ -85,31 +94,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        Intent(this, StreamingService::class.java).also { intent ->
+            bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (isBound) {
+            streamingService?.attachPreview(null) // Detach preview but keep service running
+            unbindService(connection)
+            isBound = false
+        }
+    }
+
+    // Permissions are handled in onResume logic below
     override fun onResume() {
         super.onResume()
-        if (allPermissionsGranted()) {
-            startStreaming()
-        } else {
+        if (!allPermissionsGranted()) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        stopStreaming()
-    }
+    // Streaming control is now explicit via buttons, not implicit in onResume/onPause
 
     private fun restartStreamingWithDelay() {
-        stopStreaming()
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (200ms)..."
-        // 极限优化：5ms 延迟，瞬间恢复
-        mainHandler.postDelayed({ startStreaming() }, 200)
+        // UI Action: Stop Service
+        Intent(this, StreamingService::class.java).also { intent ->
+            intent.action = "STOP"
+            startService(intent) // or startForegroundService, serves as command
+        }
+
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Restarting Service (500ms)..."
+        mainHandler.postDelayed({ startStreaming() }, 500)
     }
 
     private fun startStreaming() {
-        // 防止重复调用
-        if (videoSender != null) return
-
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         val host = prefs.getString("ip", "10.0.0.17")!!
         val bitrate = prefs.getInt("bitrate", 10)
@@ -124,123 +146,35 @@ class MainActivity : AppCompatActivity() {
                     "480p" -> 640 to 480
                     else -> 1280 to 720
                 }
-
         val isHevc = (codecStr == "H.265")
-        val mimeType =
-                if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-        val port = if (isHevc) 5001 else 5000
 
-        findViewById<TextView>(R.id.txtStatus).text =
-                "Status: Initializing $codecStr via $protocolStr..."
+        findViewById<TextView>(R.id.txtStatus).text = "Status: Starting Service ($protocolStr)..."
 
-        videoEncoder =
-                VideoEncoder(w, h, bitrate * 1_000_000, fps, mimeType) { data, ts, flags ->
-                    videoSender?.send(data, ts, flags)
-                }
-        videoEncoder?.start()
+        Intent(this, StreamingService::class.java).also { intent ->
+            intent.action = "START"
+            intent.putExtra("host", host)
+            intent.putExtra("port", if (isHevc) 5001 else 5000)
+            intent.putExtra("bitrate", bitrate)
+            intent.putExtra("fps", fps)
+            intent.putExtra("width", w)
+            intent.putExtra("height", h)
+            intent.putExtra("isHevc", isHevc)
+            intent.putExtra("protocol", protocolStr)
 
-        when (protocolStr) {
-            "SRT (Caller)" -> {
-                videoSender =
-                        SrtSender(host, port, isHevc) {
-                            runOnUiThread {
-                                findViewById<TextView>(R.id.txtStatus).text =
-                                        "Status: CONNECTED (${videoSender?.getInfo()})"
-                            }
-                            videoEncoder?.requestKeyFrame()
-                        }
-            }
-            "RTSP (Server)" -> {
-                videoSender =
-                        RtspServerSender(8554, isHevc) {
-                            runOnUiThread {
-                                videoEncoder?.requestKeyFrame()
-                                Toast.makeText(this, "Client Connected!", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                findViewById<TextView>(R.id.txtStatus).text =
-                        "Server Online: ${videoSender?.getInfo()}"
-            }
-            "Broadcast (SRT + RTSP)" -> {
-                val srtSender =
-                        SrtSender(host, port, isHevc) {
-                            runOnUiThread {
-                                val rtspInfo =
-                                        "rtsp://0.0.0.0:8554" // Approximate, actual IP might vary
-                                // but port is fixed
-                                findViewById<TextView>(R.id.txtStatus).text =
-                                        "Status: SRT Linked + RTSP Ready"
-                                videoEncoder?.requestKeyFrame()
-                            }
-                        }
-                val rtspSender =
-                        RtspServerSender(8554, isHevc) {
-                            runOnUiThread {
-                                videoEncoder?.requestKeyFrame()
-                                Toast.makeText(this, "RTSP Client Connected!", Toast.LENGTH_SHORT)
-                                        .show()
-                            }
-                        }
-                videoSender = PacketDuplicator(listOf(srtSender, rtspSender))
-                findViewById<TextView>(R.id.txtStatus).text = "Broadcast Online: SRT + RTSP"
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
             }
         }
-
-        videoSender?.start()
-        bindCamera(w, h)
     }
 
     private fun bindCamera(width: Int, height: Int) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener(
-                {
-                    val cameraProvider = cameraProviderFuture.get()
-                    val resSelector =
-                            ResolutionSelector.Builder()
-                                    .setResolutionStrategy(
-                                            ResolutionStrategy(
-                                                    Size(width, height),
-                                                    ResolutionStrategy
-                                                            .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                            )
-                                    )
-                                    .build()
-
-                    val preview =
-                            Preview.Builder().setResolutionSelector(resSelector).build().also {
-                                it.setSurfaceProvider(viewFinder?.surfaceProvider)
-                            }
-                    val encoderPreview =
-                            Preview.Builder().setResolutionSelector(resSelector).build()
-
-                    encoderPreview.setSurfaceProvider { request ->
-                        videoEncoder?.getInputSurface()?.let {
-                            request.provideSurface(it, cameraExecutor) {}
-                        }
-                    }
-
-                    try {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                                this,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview,
-                                encoderPreview
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Bind failed", e)
-                    }
-                },
-                ContextCompat.getMainExecutor(this)
-        )
+        // Logic moved to Service
     }
 
     private fun stopStreaming() {
-        mainHandler.removeCallbacksAndMessages(null) // 清理之前的延迟任务
-        videoSender?.stop()
-        videoEncoder?.stop()
-        videoSender = null
-        videoEncoder = null
+        // Logic moved to Service "STOP" action
     }
 
     private fun allPermissionsGranted() =
@@ -248,6 +182,6 @@ class MainActivity : AppCompatActivity() {
                     PackageManager.PERMISSION_GRANTED
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown()
+        // cameraExecutor is now in Service
     }
 }
