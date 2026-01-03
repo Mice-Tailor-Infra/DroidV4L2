@@ -120,8 +120,32 @@ fn main() -> Result<()> {
         run_source_loop(port_h265, "h265", state_h265);
     });
 
+    // --- RTSP Thread ---
+    // Note: Android app pushes RTSP to this listener
+    // We infer the IP from MJPEG URL if present, or just use 10.0.0.6 as a fallback during testing
+    // In a real scenario, the user might need to specify the phone's IP
+    let rtsp_url = if let Some(ref mjpeg) = args.mjpeg {
+        // Extract IP from MJPEG URL: http://10.0.0.6:8080/ -> rtsp://10.0.0.6:8554/live.sdp
+        let parts: Vec<&str> = mjpeg.split('/').collect();
+        if parts.len() >= 3 {
+            let host_port = parts[2];
+            let host = host_port.split(':').next().unwrap_or("10.0.0.6");
+            format!("rtsp://{}:{}/live.sdp", host, args.port_rtsp)
+        } else {
+            format!("rtsp://10.0.0.6:{}/live.sdp", args.port_rtsp)
+        }
+    } else {
+        format!("rtsp://10.0.0.6:{}/live.sdp", args.port_rtsp)
+    };
+
+    let state_rtsp = Arc::clone(&state);
+    let rtsp_thread = thread::spawn(move || {
+        run_rtsp_loop(&rtsp_url, state_rtsp);
+    });
+
     h264_thread.join().unwrap();
     h265_thread.join().unwrap();
+    rtsp_thread.join().unwrap();
     if let Some(t) = mjpeg_thread {
         t.join().unwrap();
     }
@@ -187,6 +211,69 @@ fn run_mjpeg_loop(url: &str, state: Arc<Mutex<BridgeState>>) {
                 println!("[NETWORK] MJPEG Listener DISCONNECTED (restarting...)");
             }
             Err(e) => println!("[GST-ERR] Failed to launch MJPEG pipeline: {}", e),
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn run_rtsp_loop(url: &str, state: Arc<Mutex<BridgeState>>) {
+    println!("[THREAD] Starting RTSP loop on URL: {}", url);
+    loop {
+        let pipeline_str = pipeline::make_rtsp_pipeline_str(url);
+        match gst::parse_launch(&pipeline_str) {
+            Ok(pipe) => {
+                println!("[NETWORK] RTSP Listener ATTEMPTING to CONNECT to {}", url);
+                let appsink = pipe
+                    .downcast_ref::<gst::Bin>()
+                    .unwrap()
+                    .by_name("mysink")
+                    .unwrap()
+                    .downcast::<gst_app::AppSink>()
+                    .unwrap();
+
+                let state_input = Arc::clone(&state);
+                appsink.set_callbacks(
+                    gst_app::AppSinkCallbacks::builder()
+                        .new_sample(move |sink| {
+                            let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
+                            let mut s = state_input.lock().unwrap();
+
+                            if s.active_codec != "rtsp" {
+                                println!("[SWITCH] Codec changed: {} -> rtsp", s.active_codec);
+                                s.active_codec = "rtsp".to_string();
+                            }
+
+                            s.last_sample = Some(sample.clone());
+                            s.last_update = Instant::now();
+                            s.push_sample_to_appsrc(sample);
+                            Ok(gst::FlowSuccess::Ok)
+                        })
+                        .build(),
+                );
+
+                if let Err(e) = pipe.set_state(gst::State::Playing) {
+                    println!("[GST-ERR] RTSP set_state(Playing) failed: {}", e);
+                } else {
+                    let bus = pipe.bus().unwrap();
+                    for msg in bus.iter_timed(gst::ClockTime::NONE) {
+                        use gst::MessageView;
+                        match msg.view() {
+                            MessageView::Error(err) => {
+                                println!("[GST-ERR] RTSP Pipeline Error: {}", err.error());
+                                break;
+                            }
+                            MessageView::Eos(..) => {
+                                println!("[GST-EOS] RTSP EOS");
+                                break;
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                let _ = pipe.set_state(gst::State::Null);
+                println!("[NETWORK] RTSP Listener DISCONNECTED (restarting...)");
+            }
+            Err(e) => println!("[GST-ERR] Failed to launch RTSP pipeline: {}", e),
         }
         thread::sleep(Duration::from_secs(2));
     }

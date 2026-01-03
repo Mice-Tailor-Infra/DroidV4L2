@@ -29,6 +29,13 @@ pub fn make_mjpeg_pipeline_str(url: &str) -> String {
     )
 }
 
+pub fn make_rtsp_pipeline_str(url: &str) -> String {
+    format!(
+        "rtspsrc location={} latency=20 ! rtph264depay ! h264parse ! avdec_h264 ! videoflip method=clockwise ! videoconvert ! video/x-raw,pixel-aspect-ratio=1/1 ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1 ! appsink name=mysink sync=false drop=true max-buffers=1",
+        url
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,9 +52,20 @@ mod tests {
         let h264 = make_source_pipeline_str(5000, "h264");
         assert!(h264.contains("5000"));
         assert!(h264.contains("h264parse"));
+        assert!(h264.contains("videoflip method=clockwise"));
 
         let h265 = make_source_pipeline_str(5001, "h265");
         assert!(h265.contains("5001"));
         assert!(h265.contains("h265parse"));
+        assert!(h264.contains("videoflip method=clockwise"));
+    }
+
+    #[test]
+    fn test_rtsp_pipeline_gen() {
+        let url = "rtsp://10.0.0.6:8554/live.sdp";
+        let s = make_rtsp_pipeline_str(url);
+        assert!(s.contains(url));
+        assert!(s.contains("rtspsrc"));
+        assert!(s.contains("videoflip method=clockwise"));
     }
 }
