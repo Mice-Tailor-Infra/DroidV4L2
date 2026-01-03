@@ -191,9 +191,24 @@ class WebRtcManager(private val context: Context) {
         }
     }
 
+    private var frameCount = 0
+    private var lastLogTime = 0L
+
     fun onFrame(image: androidx.camera.core.ImageProxy) {
         val timestampNs = image.imageInfo.timestamp
         val planes = image.planes
+
+        // Debug Log every 30 frames
+        frameCount++
+        val now = System.currentTimeMillis()
+        if (now - lastLogTime > 1000) {
+            Log.d(
+                    TAG,
+                    "WebRTC Frames: $frameCount / last 1s. Res: ${image.width}x${image.height} Rotation: ${image.imageInfo.rotationDegrees} Planes: ${planes.size} PixelStride: [${planes[0].pixelStride}, ${planes[1].pixelStride}, ${planes[2].pixelStride}]"
+            )
+            frameCount = 0
+            lastLogTime = now
+        }
 
         // Note: This logic assumes I420 memory layout.
         // If CameraX produces NV12/NV21 (interleaved UV), this might need pixelStride checks.
