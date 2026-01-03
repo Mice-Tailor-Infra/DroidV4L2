@@ -7,8 +7,6 @@ pub struct Args {
     pub port_h264: u16,
     #[arg(short = '5', long, default_value_t = 5001)]
     pub port_h265: u16,
-    #[arg(short = 'r', long, default_value_t = 8554)]
-    pub port_rtsp: u16,
     #[arg(short, long, default_value = "/dev/video10")]
     pub device: String,
 
@@ -26,7 +24,6 @@ mod tests {
         let args = Args::parse_from(["app"]);
         assert_eq!(args.port_h264, 5000);
         assert_eq!(args.port_h265, 5001);
-        assert_eq!(args.port_rtsp, 8554);
         assert_eq!(args.device, "/dev/video10");
         assert!(args.mjpeg.is_none());
     }
@@ -39,8 +36,6 @@ mod tests {
             "6000",
             "-5",
             "6001",
-            "-r",
-            "9000",
             "--device",
             "/dev/video20",
             "--mjpeg",
@@ -48,7 +43,6 @@ mod tests {
         ]);
         assert_eq!(args.port_h264, 6000);
         assert_eq!(args.port_h265, 6001);
-        assert_eq!(args.port_rtsp, 9000);
         assert_eq!(args.device, "/dev/video20");
         assert_eq!(args.mjpeg.unwrap(), "http://test.com");
     }
