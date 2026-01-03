@@ -1,10 +1,75 @@
+# DroidV4L2: 桌面级高性能 Android-Linux 虚拟摄像头
+
+**DroidV4L2** 将您的 Android 设备转换为 Linux 下的低延迟、高质量无线摄像头。
+
+## 🌟 核心特性
+
+*   **超低延迟**: 针对 5G WiFi 环境深度优化，端到端延迟低于 50ms。通过 `KEY_LATENCY=0` (API 26+) 和 SRT 协议激进调优实现。
+*   **多协议支持**: 
+    *   **SRT (Caller)**: 专业级、超低延迟流媒体协议，专为 Linux Bridge 调优，具备 30ms 的极致缓冲区控制。
+    *   **RTSP (Server)**: 通用播放模式，由 **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)** 驱动，支持标准的 H.264 和 H.265 (HEVC) 编码。
+    *   **MJPEG (Fallback)**: 备用 HTTP 视频流，确保在任何环境下都能具备基本的兼容性。
+*   **实时屏保**: 当无客户端连接时，自动显示专业 SMPTE 彩条，防止 V4L2 消费端（如 OBS 或 Zoom）出现黑屏或报错。
+*   **无缝编码切换**: 利用 "Caps Lockdown" 技术，支持在运行时无缝切换 H.264 和 H.265 编码，无需重新加载虚拟摄像头设备。
+*   **双编码支持**:
+    *   **H.264 (AVC)**: 适配性最强，确保在各种 Linux 系统下都能正常运行。
+    *   **H.265 (HEVC)**: 在同等画质下仅需一半带宽，非常适合高分辨率传输。
+*   **动态参数调节**: 支持在运行时动态修改分辨率（480p/720p/1080p）和帧率（30/60 FPS）。
+*   **Moonlight 风格 UI**: 简洁高效的 Android 设置面板，类似 Moonlight 客户端的极简交互。
+
+## 🏗 技术架构
+
+### Android App (发送端)
+*   **VideoSender 接口**: 解耦的网络传输层，支持轻松扩展不同流媒体协议。
+*   **SRT 模式**: 使用 `SrtClient` 进行高性能推流。
+*   **CameraX + MediaCodec**: 纯硬件加速的视频采集与编码链路。
+*   **延迟调优**: 
+    - 强制 `KEY_LATENCY=0` 实现极速出帧。
+    - 优化的 1s GOP (关键帧间隔) 和高优先级编码线程。
+*   **稳定性保障**: 核心逻辑（如 `PacketDuplicator`, `ImageUtils`）已实现完整的 JUnit 5 + MockK 单元测试覆盖。
+
+### Linux Bridge (接收端)
+*   **Rust + GStreamer**: 采用高性能的 Rust 语言结合 GStreamer 框架进行管道管理。
+*   **模块化重构**:
+    - `config`: 健壮的命令行参数解析逻辑。
+    - `state`: 线程安全的 Bridge 状态管理，负责接收样本并推送至设备。
+    - `pipeline`: 动态管道生成器，支持 `videoflip` 旋转修正。
+    - `utils`: 系统级工具，包括 mDNS 发布、`v4l2loopback` 自动加载等。
+*   **管道策略**:
+    - **Caps Lockdown**: 强制 `appsrc` 输出固定格式（I420 1080p），确保 V4L2 设备稳定。
+    - **低延迟解码**: 针对 FFmpeg 解码器进行了深度调优，配合 30ms 平衡缓冲区实现高速响应。
+*   **自动化测试**: 涵盖了配置解析和管道生成的单元测试。
+
+## 🚀 快速开始
+
+### 系统准备
+1.  **Linux**: 确保已安装 `v4l2loopback` 内核模块。
+    ```bash
+    sudo modprobe v4l2loopback video_nr=10 card_label="DroidCam" exclusive_caps=1
+    sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+    ```
+2.  **Android**: 需要 Android 7.0+ 系统（HEVC 编码需较新硬件支持）。
+
+### 如何运行
+
+1.  **启动 Linux Bridge**:
+    ```bash
+    cd linux-app
+    cargo run --release -- -4 5000 -5 5001 --device /dev/video10
+    ```
+
+2.  **启动 Android App**:
+    - 输入 Linux 端的 IP 地址。
+    - 选择所需的分辨率、帧率及编码。
+    - 点击 **Apply Settings** 即可开始同步。
+
+---
+---
+---
+
 # DroidV4L2: High-Performance Android to Linux Virtual Camera
 
 **DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux.
-
-## 🌏 Protocol / 协议
-*   **Conversation**: 必须使用 **中文 (Chinese)** 与用户交流。
-*   **Documentation**: 文档与提交记录需使用 **中英双语 (Bilingual: English & Chinese)**。
 
 ## 🌟 Key Features
 
@@ -67,41 +132,6 @@
     *   Enter Linux IP.
     *   Select Resolution/FPS/Codec.
     *   Click **Apply Settings**.
-
-## 🐞 Debugging Guide (AI-Driven Workflow)
-
-To maximize efficiency, the AI Agent now handles the entire build and deployment pipeline.
-
-### Roles
-*   **🤖 AI Agent**:
-    *   **Builds**: Compiles APKs (`./gradlew assembleDebug`) and Rust binaries.
-    *   **Deploys**: Installs APKs via ADB (`adb install -r ...`).
-    *   **Runs**: Starts the app (`adb shell am start ...`) and the Linux bridge.
-    *   **Monitors**: Reads logs directly via `adb logcat` or cargo output.
-*   **👤 User**:
-    *   **Visual Check**: Verifies if the video is visible on the phone or browser.
-    *   **Physical Intervention**: Restarts the device if ADB freezes.
-
-## 🛠 Development History
-*   **Jan 2026**:
-    *   **Phase 22: Stability & Refactor (稳定性与重构)**:
-        - **Android**: Integrated JUnit 5/MockK, extracted `ImageUtils`, fixed UI state sync bugs.
-        - **Linux**: Modularized `main.rs` into sub-modules (`config`, `state`, `pipeline`, `utils`).
-    *   **Phase 23: SRT Performance Tuning (SRT 性能优化)**:
-        - **Latency**: Implemented `KEY_LATENCY` flags and optimized SRT buffering (30ms).
-        - **Orientation**: Fixed rotation issues in the Linux Bridge pipeline.
-
-*   **Agent Sync & Handover**
-> **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
-
-*   **Last Agent**: Antigravity
-*   **Timestamp**: Jan 4, 2026 (Phase 23 Completed)
-*   **Current Status**: 
-    *   ✅ **Phase 22**: Unit Testing & Modularization Completed.
-    *   ✅ **Phase 23**: Low-Latency SRT Tuning & Rotation Fix Completed.
-*   **Next Task**:
-    *   **Objective**: Maintenance or new features (e.g., Audio support or WebRTC re-visit).
-    *   **Instruction**: System is stable with solid test coverage and modular architecture. 
 
 ---
 *Project maintained by cagedbird043.*
