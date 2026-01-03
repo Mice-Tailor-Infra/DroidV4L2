@@ -324,9 +324,9 @@ class StreamingService : LifecycleService() {
                     try {
                         cameraProvider.unbindAll()
 
-                        if (config.protocol == "WebRTC") {
-                            // Pure WebRTC Mode: Bind Analysis + View
-                            Log.i(TAG, "Mode: WebRTC Only. Binding ImageAnalysis + Preview")
+                        if (config.protocol == "WebRTC" || config.protocol == "MJPEG (HTTP)") {
+                            // Pure WebRTC or MJPEG Mode: Bind Analysis + View
+                            Log.i(TAG, "Mode: WebRTC/MJPEG. Binding ImageAnalysis + Preview")
                             cameraProvider.bindToLifecycle(
                                     this,
                                     CameraSelector.DEFAULT_BACK_CAMERA,

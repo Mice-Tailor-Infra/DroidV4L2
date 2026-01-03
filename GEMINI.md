@@ -58,59 +58,41 @@
     *   Select Resolution/FPS/Codec.
     *   Click **Apply Settings**.
 
-## 🐞 Debugging Guide (AI + User Workflow)
+## 🐞 Debugging Guide (AI-Driven Workflow)
 
-To ensure efficiency, we follow a strict **"AI Builds, User Runs"** protocol.
+To maximize efficiency, the AI Agent now handles the entire build and deployment pipeline.
 
 ### Roles
 *   **🤖 AI Agent**:
-    *   Compiles Android APK (`./gradlew assembleDebug`).
-    *   Compiles Linux Rust Bridge (`cargo build --release`).
-    *   Fixes code based on logs provided by the user.
+    *   **Builds**: Compiles APKs (`./gradlew assembleDebug`) and Rust binaries.
+    *   **Deploys**: Installs APKs via ADB (`adb install -r ...`).
+    *   **Runs**: Starts the app (`adb shell am start ...`) and the Linux bridge.
+    *   **Monitors**: Reads logs directly via `adb logcat`.
 *   **👤 User**:
-    *   Installs the APK on the device (`adb install ...`).
-    *   Runs the Linux Bridge.
-    *   **Opens Two Terminals** to monitor the system live.
-
-### Recommended Terminal Setup
-
-#### Terminal 1: Linux Bridge (Receiver)
-Runs the Rust application to receive the stream.
-```bash
-cd linux-app
-# Use RUST_LOG=info or debug for more details
-RUST_LOG=info cargo run --release -- -4 5000 -5 5001 --device /dev/video10
-```
-
-#### Terminal 2: Android Logs (Sender)
-Monitors the Android device output via ADB.
-```bash
-adb logcat -c  # Clear old logs
-# Filter for key tags: Main App, SRT, RTSP, Encoder, and System Errors
-adb logcat -v color -s DroidV4L2 SrtSender TinyRtspKt VideoEncoder System.err
-```
+    *   **Visual Check**: Verifies if the video is visible on the phone or browser.
+    *   **Physical Intervention**: Restarts the device if ADB freezes.
 
 ## 🛠 Development History
 *   **Jan 2026**:
-    *   **Phase 4: 易用性与打磨 (Ease of Use & Polish)**:
-        - **Auto-Modprobe**: Linux 端自动加载 `v4l2loopback` 模块。
-        - **Service Mode**: Android 端实现后台/息屏推流 (Foreground Service)。
-        - **Stability V3**: 实施 "Bind-Both-Always" 策略，彻底解决了切后台花屏和启动卡顿问题。
-        - **Auto-Discovery**: 实现了 mDNS 自动发现 (Linux `avahi-publish` + Android `NsdManager`)，一键连接。
+    *   **Phase 4: 易用性 (Ease of Use)**: Auto-Modprobe, Foreground Service, mDNS.
+    *   **Phase 5: WebRTC (Paused)**: Implemented but faced device-specific compatibility issues (NV12 color swap, crash on init).
+    *   **Phase 6: MJPEG Fallback (Completed)**:
+        - **Robustness**: Replaced WebRTC with a "failsafe" HTTP MJPEG stream.
+        - **Crash Fix**: Implemented lazy-loading for WebRTC to prevent service crashes on non-compatible devices.
+        - **Universal Support**: Works on any browser without complex signaling.
 
 ## 🤖 Agent Sync & Handover
 > **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
 
 *   **Last Agent**: Antigravity
-*   **Timestamp**: Jan 3, 2026 (Phase 4 Completed)
+*   **Timestamp**: Jan 3, 2026 (Phase 6 Completed)
 *   **Current Status**: 
-    *   ✅ **Phase 3**: Broadcast Mode (SRT + RTSP 并发)。
-    *   ✅ **Phase 4**: 易用性与稳定性 (Service Mode, Auto-Find, Stability V3)。
-    *   ✨ **Ready**: 系统现在功能完备、稳定且易于使用。
+    *   ✅ **Phase 6**: MJPEG Fallback Mode (`http://<IP>:8080/stream`) is fully functional.
+    *   🛠 **Fixes**: Resolved `NoClassDefFoundError` crashing the service.
+    *   ⚠️ **Known Issue**: MJPEG color channels (Blue/Red) might be swapped on some NV12 cameras. This is a known trade-off for compatibility.
 *   **Next Task**:
-    *   **Objective**: Phase 5 (WebRTC) 或 合并代码。
-    *   **Context**: 所有已知 bug 已修复，自动发现已验证通过。
-    *   **Instruction**: 建议合并到 `main` 分支。如果用户想继续，可以开始调研 WebRTC。
+    *   **Objective**: User Validation or UI Polish.
+    *   **Instruction**: If user is satisfied with MJPEG, merge to `main`. If WebRTC is still desired, requires deep dive into `libwebrtc` build variants.
 
 ---
 *Project maintained by cagedbird043.*
