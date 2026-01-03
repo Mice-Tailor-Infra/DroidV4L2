@@ -53,6 +53,10 @@ class StreamingService : LifecycleService() {
     // Preview
     private var viewFinder: PreviewView? = null
 
+    // Preview persistence
+    private var encoderPreview: Preview? = null
+    private var viewPreview: Preview? = null
+
     inner class LocalBinder : Binder() {
         fun getService(): StreamingService = this@StreamingService
     }
@@ -167,7 +171,6 @@ class StreamingService : LifecycleService() {
     fun attachPreview(previewView: PreviewView?) {
         viewFinder = previewView
         if (isStreaming) {
-            // Rebind camera to include the new surface provider
             bindCamera()
         }
     }
@@ -190,47 +193,54 @@ class StreamingService : LifecycleService() {
                                     )
                                     .build()
 
-                    // 1. Encoder Preview (Required)
-                    val encoderPreview =
-                            Preview.Builder().setResolutionSelector(resSelector).build()
-                    encoderPreview.setSurfaceProvider { request ->
-                        videoEncoder?.getInputSurface()?.let {
-                            request.provideSurface(it, cameraExecutor) {}
+                    // 1. Setup Persistent Encoder Preview
+                    if (encoderPreview == null) {
+                        encoderPreview =
+                                Preview.Builder().setResolutionSelector(resSelector).build()
+                        encoderPreview?.setSurfaceProvider { request ->
+                            videoEncoder?.getInputSurface()?.let {
+                                request.provideSurface(it, cameraExecutor) {}
+                            }
+                        }
+                        try {
+                            // Only unbind all when initializing the core encoder stream for the
+                            // first time
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                    this,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    encoderPreview!!
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Binding encoder failed", e)
                         }
                     }
 
-                    // 2. View Finder (Optional, for UI)
-                    var viewPreview: Preview? = null
+                    // 2. Setup/Destroy UI Preview (ViewFinder)
                     if (viewFinder != null) {
-                        viewPreview = Preview.Builder().setResolutionSelector(resSelector).build()
-                        viewPreview.setSurfaceProvider(viewFinder?.surfaceProvider)
-                    }
-
-                    try {
-                        cameraProvider.unbindAll()
-                        // Use LifeCycleService (this) as lifecycle owner
-                        if (viewPreview != null) {
-                            cameraProvider.bindToLifecycle(
-                                    this,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    encoderPreview,
-                                    viewPreview
-                            )
-                        } else {
-                            cameraProvider.bindToLifecycle(
-                                    this,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    encoderPreview
-                            )
+                        if (viewPreview == null) {
+                            viewPreview =
+                                    Preview.Builder().setResolutionSelector(resSelector).build()
+                            viewPreview?.setSurfaceProvider(viewFinder?.surfaceProvider)
                         }
-
-                        // Fix for artifacts ("flower screen") on transition:
-                        // The unbind/bind cycle causes a gap in frames.
-                        // Force a keyframe immediately to restore the picture.
-                        videoEncoder?.requestKeyFrame()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Bind failed", e)
+                        try {
+                            cameraProvider.bindToLifecycle(
+                                    this,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    viewPreview!!
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Binding viewPreview failed", e)
+                        }
+                    } else {
+                        viewPreview?.let {
+                            cameraProvider.unbind(it)
+                            viewPreview = null
+                        }
                     }
+
+                    // Recovery keyframe
+                    videoEncoder?.requestKeyFrame()
                 },
                 ContextCompat.getMainExecutor(this)
         )
@@ -242,6 +252,10 @@ class StreamingService : LifecycleService() {
         videoEncoder?.stop()
         videoSender = null
         videoEncoder = null
+
+        // Clear use cases
+        encoderPreview = null
+        viewPreview = null
     }
 
     private fun createNotificationChannel() {
