@@ -279,34 +279,12 @@ class StreamingService : LifecycleService() {
                                 }
 
                                 // Rotate NV21 90 degrees clockwise
-                                // Source: width x height
-                                // Dest: height x width
-                                val rotatedNv21 = ByteArray(nv21.size)
+                                // 使用 ImageUtils 统一管理旋转逻辑
                                 val width = image.width
                                 val height = image.height
+                                val rotatedNv21 = ImageUtils.rotateNV21(nv21, width, height)
                                 val newWidth = height
                                 val newHeight = width
-
-                                // Rotate Y (1 byte per pixel)
-                                var i = 0
-                                for (x in 0 until width) {
-                                    for (y in height - 1 downTo 0) {
-                                        rotatedNv21[i++] = nv21[y * width + x]
-                                    }
-                                }
-
-                                // Rotate UV
-                                // UV is interleaved. We copy 2 bytes at a time (V, U)
-                                // UV block starts at width * height
-                                val uvStart = width * height
-                                i = uvStart
-                                for (x in 0 until width step 2) {
-                                    for (y in (height / 2) - 1 downTo 0) {
-                                        val offset = uvStart + (y * width) + x
-                                        rotatedNv21[i++] = nv21[offset] // V
-                                        rotatedNv21[i++] = nv21[offset + 1] // U
-                                    }
-                                }
 
                                 val out = java.io.ByteArrayOutputStream()
                                 val yuvImage =
