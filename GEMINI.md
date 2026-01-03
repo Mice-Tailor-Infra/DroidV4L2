@@ -81,18 +81,20 @@ To maximize efficiency, the AI Agent now handles the entire build and deployment
         - **Crash Fix**: Implemented lazy-loading for WebRTC to prevent service crashes on non-compatible devices.
         - **Universal Support**: Works on any browser without complex signaling.
 
-## 🤖 Agent Sync & Handover
+*   **Agent Sync & Handover**
 > **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
 
 *   **Last Agent**: Antigravity
-*   **Timestamp**: Jan 3, 2026 (Phase 6 Completed)
+*   **Timestamp**: Jan 3, 2026 (Phase 8 Completed)
 *   **Current Status**: 
-    *   ✅ **Phase 6**: MJPEG Fallback Mode (`http://<IP>:8080/stream`) is fully functional.
-    *   🛠 **Fixes**: Resolved `NoClassDefFoundError` crashing the service.
-    *   ⚠️ **Known Issue**: MJPEG color channels (Blue/Red) might be swapped on some NV12 cameras. This is a known trade-off for compatibility.
+    *   ✅ **Phase 6**: MJPEG Fallback Mode (`http://<IP>:8080/stream`) fully functional.
+    *   ✅ **Phase 7**: Linux Bridge `souphttpsrc` pipeline active.
+    *   ✅ **Phase 8**: Fixed "Wide Putin" (Rotation) & Flickering.
+        - **Android**: Reverted to safe 1280x720 resolution.
+        - **Linux**: Added `videoflip method=clockwise` to rotate landscape stream.
 *   **Next Task**:
-    *   **Objective**: User Validation or UI Polish.
-    *   **Instruction**: If user is satisfied with MJPEG, merge to `main`. If WebRTC is still desired, requires deep dive into `libwebrtc` build variants.
+    *   **Objective**: Maintenance or new features.
+    *   **Instruction**: System is stable. Future work could involve bitrate control optimization or re-visiting WebRTC if device support improves.
 
 ---
 *Project maintained by cagedbird043.*
