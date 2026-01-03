@@ -17,7 +17,7 @@ pub fn make_source_pipeline_str(port: u16, codec: &str) -> String {
     };
 
     format!(
-        "srtsrc uri=srt://:{}?mode=listener&latency=20&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoflip method=clockwise ! videoconvert ! video/x-raw,pixel-aspect-ratio=1/1 ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1 ! appsink name=mysink sync=false drop=true max-buffers=1",
+        "srtsrc uri=srt://:{}?mode=listener&latency=30&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoflip method=clockwise ! videoconvert ! video/x-raw,pixel-aspect-ratio=1/1 ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1 ! appsink name=mysink sync=false drop=true max-buffers=1",
         port, parser_decoder
     )
 }
