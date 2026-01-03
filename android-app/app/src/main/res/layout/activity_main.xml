@@ -1,111 +1,282 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000">
+    android:background="@android:color/black"
+    tools:context=".MainActivity">
 
+    <!-- 1. Full Screen Preview (FitCenter to match Linux aspect) -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:scaleType="fitCenter" />
 
+    <!-- 2. Top Bar: Status & My IP -->
     <LinearLayout
-        android:layout_width="300dp"
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_margin="16dp"
-        android:background="#A0000000"
+        android:background="#80000000"
+        android:padding="8dp"
         android:orientation="vertical"
-        android:padding="16dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="DroidV4L2 Moonlight Panel"
-            android:textColor="#00FF00"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <EditText
-                android:id="@+id/editIp"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:hint="Target IP"
-                android:text="10.0.0.17"
-                android:textColor="#FFF"
-                android:textColorHint="#888" />
-            <Button
-                android:id="@+id/btnAutoFind"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🔍 Auto"
-                android:textSize="12sp"
-                android:backgroundTint="#444"
-                android:textColor="#FFF"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Bitrate (Mbps)" android:textColor="#FFF"/>
-            <EditText android:id="@+id/editBitrate" android:layout_width="60dp" android:layout_height="wrap_content" android:text="10" android:textColor="#FFF" android:inputType="number"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Resolution" android:textColor="#FFF"/>
-            <Spinner android:id="@+id/spinnerRes" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="FPS" android:textColor="#FFF"/>
-            <Spinner android:id="@+id/spinnerFps" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Codec" android:textColor="#FFF"/>
-            <Spinner android:id="@+id/spinnerCodec" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Protocol" android:textColor="#FFF"/>
-            <Spinner android:id="@+id/spinnerProtocol" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="#FFF" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/btnApply"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Apply Settings" />
+        app:layout_constraintTop_toTopOf="parent">
 
         <TextView
             android:id="@+id/txtStatus"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Status: Idle"
-            android:textColor="#00FF00"
-            android:textSize="11sp" />
+            android:text="🔴 Idle"
+            android:textColor="#FF4444"
+            android:textStyle="bold"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/txtMyIp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="My IP: 127.0.0.1"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp" />
+        
+        <TextView
+            android:id="@+id/txtStreamUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="URL: -"
+            android:textColor="#44FF44"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:visibility="visible" />
     </LinearLayout>
-</FrameLayout>
+
+    <!-- 3. Bottom Control Panel (ScrollView for small screens) -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#CC000000"
+        app:layout_constraintBottom_toBottomOf="parent"
+        android:paddingBottom="80dp"> <!-- Padding for FAB -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <!-- Card 1: Connection -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:cardBackgroundColor="#222222"
+                app:strokeColor="#444444"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Connection"
+                        android:textColor="@android:color/white"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="Linux IP (Target)"
+                            app:boxBackgroundColor="#333333"
+                            app:boxStrokeColor="@android:color/white">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/editIp"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="10.0.0.17"
+                                android:textColor="@android:color/white"
+                                android:inputType="textUri" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <Button
+                            android:id="@+id/btnAutoFind"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🔍 Auto"
+                            android:layout_marginStart="8dp"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Transport Protocol"
+                        android:textColor="#AAAAAA"
+                        android:textSize="12sp"
+                        android:layout_marginTop="8dp"/>
+
+                    <Spinner
+                        android:id="@+id/spinnerProtocol"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:background="#333333"
+                        android:theme="@style/ThemeOverlay.AppCompat.Dark" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Card 2: Stream Settings -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="#222222"
+                app:strokeColor="#444444"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Stream Settings"
+                        android:textColor="@android:color/white"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <!-- Resolution -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Res"
+                                android:textColor="#AAAAAA"
+                                android:textSize="10sp"/>
+                            <Spinner
+                                android:id="@+id/spinnerRes"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:background="#333333"
+                                android:theme="@style/ThemeOverlay.AppCompat.Dark"/>
+                        </LinearLayout>
+
+                        <Space android:layout_width="8dp" android:layout_height="wrap_content"/>
+
+                        <!-- FPS -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="FPS"
+                                android:textColor="#AAAAAA"
+                                android:textSize="10sp"/>
+                            <Spinner
+                                android:id="@+id/spinnerFps"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:background="#333333"
+                                android:theme="@style/ThemeOverlay.AppCompat.Dark"/>
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <!-- Codec -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Codec"
+                                android:textColor="#AAAAAA"
+                                android:textSize="10sp"/>
+                            <Spinner
+                                android:id="@+id/spinnerCodec"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:background="#333333"
+                                android:theme="@style/ThemeOverlay.AppCompat.Dark"/>
+                        </LinearLayout>
+
+                        <Space android:layout_width="8dp" android:layout_height="wrap_content"/>
+
+                        <!-- Bitrate -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Bitrate (Mbps)"
+                                android:textColor="#AAAAAA"
+                                android:textSize="10sp"/>
+                            <EditText
+                                android:id="@+id/editBitrate"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:background="#333333"
+                                android:textColor="@android:color/white"
+                                android:inputType="number"
+                                android:text="10"
+                                android:padding="4dp"/>
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- 4. Floating Action Button (Start/Stop) -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/btnToggle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:backgroundTint="#FF4444"
+        app:tint="@android:color/white"
+        app:srcCompat="@android:drawable/ic_media_play"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
