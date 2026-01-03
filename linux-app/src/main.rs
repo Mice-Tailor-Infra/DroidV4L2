@@ -313,8 +313,9 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
 
         // Force Scale + Convert to I420 1080p with correct aspect ratio
         // Removed streamid=live constraint to fix handshake failure
+        // Added videoflip to rotate landscape phone stream to portrait
         let src_pipeline_str = format!(
-            "srtsrc uri=srt://:{}?mode=listener&latency=20&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoconvert ! video/x-raw,pixel-aspect-ratio=1/1 ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            "srtsrc uri=srt://:{}?mode=listener&latency=20&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoflip method=clockwise ! videoconvert ! video/x-raw,pixel-aspect-ratio=1/1 ! videoscale add-borders=true ! video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1 ! appsink name=mysink sync=false drop=true max-buffers=1",
             port, parser_decoder
         );
 
