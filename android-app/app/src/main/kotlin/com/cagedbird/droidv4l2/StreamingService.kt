@@ -292,18 +292,48 @@ class StreamingService : LifecycleService() {
                                     }
                                 }
 
+                                // Rotate NV21 90 degrees clockwise
+                                // Source: width x height
+                                // Dest: height x width
+                                val rotatedNv21 = ByteArray(nv21.size)
+                                val width = image.width
+                                val height = image.height
+                                val newWidth = height
+                                val newHeight = width
+
+                                // Rotate Y (1 byte per pixel)
+                                var i = 0
+                                for (x in 0 until width) {
+                                    for (y in height - 1 downTo 0) {
+                                        rotatedNv21[i++] = nv21[y * width + x]
+                                    }
+                                }
+
+                                // Rotate UV
+                                // UV is interleaved. We copy 2 bytes at a time (V, U)
+                                // UV block starts at width * height
+                                val uvStart = width * height
+                                i = uvStart
+                                for (x in 0 until width step 2) {
+                                    for (y in (height / 2) - 1 downTo 0) {
+                                        val offset = uvStart + (y * width) + x
+                                        rotatedNv21[i++] = nv21[offset] // V
+                                        rotatedNv21[i++] = nv21[offset + 1] // U
+                                    }
+                                }
+
                                 val out = java.io.ByteArrayOutputStream()
                                 val yuvImage =
                                         android.graphics.YuvImage(
-                                                nv21,
+                                                rotatedNv21,
                                                 android.graphics.ImageFormat.NV21,
-                                                image.width,
-                                                image.height,
+                                                newWidth,
+                                                newHeight,
                                                 null
                                         )
                                 // High compression for speed
                                 yuvImage.compressToJpeg(
-                                        android.graphics.Rect(0, 0, image.width, image.height),
+                                        android.graphics.Rect(0, 0, newWidth, newHeight),
                                         50,
                                         out
                                 )
