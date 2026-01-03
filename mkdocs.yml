@@ -1,0 +1,74 @@
+site_name: DroidV4L2
+site_url: https://miceworld.top/DroidV4L2/
+site_description: High-Performance Android to Linux Virtual Camera
+repo_url: https://github.com/Mice-Tailor-Infra/DroidV4L2
+repo_name: Mice-Tailor-Infra/DroidV4L2
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: zh
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - i18n:
+      default_language: zh
+      languages:
+        - zh: 中文
+        - en: English
+      fallback_to_default: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+nav:
+  - 🏠 首页: index.md
+  - 🏗 架构解析:
+      - 视频采集与编码: architecture/android.md
+      - GStreamer 管道: architecture/pipeline.md
+      - '自研核心: TinyRtspKt': architecture/tinyrtsp.md
+  - 📖 API 参考:
+      - Android API: reference/android-api.md
+      - Linux Bridge: reference/rust-api.md
+  - 🚀 开发指南:
+      - 快速上手: dev/onboarding.md
+      - 低延迟调优: guide/low-latency.md
+  - 💡 其他:
+      - 故障排查: guide/troubleshooting.md
+      - 项目致谢与许可: about/thanks.md
