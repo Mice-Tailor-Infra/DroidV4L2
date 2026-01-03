@@ -1,73 +1,107 @@
-# DroidV4L2: Universal Android Camera Source
+# DroidV4L2: High-Performance Android to Linux Virtual Camera
 
-**DroidV4L2** transforms your spare Android device into a high-performance, ultra-low-latency wireless webcam for Linux.
+**DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux.
 
-Unlike generic IP camera apps, DroidV4L2 is purpose-built for **professional low-latency usage**, supporting SRT (Secure Reliable Transport) for a rock-solid Linux bridge and RTSP for universal compatibility.
+## 🌏 Protocol / 协议
+*   **Conversation**: 必须使用 **中文 (Chinese)** 与用户交流。
+*   **Documentation**: 文档与提交记录需使用 **中英双语 (Bilingual: English & Chinese)**。
 
-[中文说明](#中文说明)
+## 🌟 Key Features
+
+*   **Ultra-Low Latency**: Optimized for <50ms glass-to-glass latency on 5GHz WiFi. Fixed with `KEY_LATENCY=0` (API 26+) and aggressive SRT tuning.
+*   **Multi-Protocol Support**: 
+    *   **SRT (Caller)**: Pro-grade, low-latency streaming for the Linux Bridge. Now with 30ms optimized buffering.
+    *   **RTSP (Server)**: Universal mode powered by **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)**. Supports standard H.264 and H.265 (HEVC).
+    *   **MJPEG (Fallback)**: Robust HTTP stream for maximum compatibility.
+*   **Always-On Screensaver**: Automatically displays professional SMPTE color bars when no client is connected, preventing V4L2 consumer errors.
+*   **Seamless Codec Switching**: Runtime H.264/H.265 switching via "Caps Lockdown" (no V4L2 freezes).
+*   **Dual Codec Support**:
+    *   **H.264 (AVC)**: Maximum compatibility.
+    *   **H.265 (HEVC)**: Half the bandwidth for the same quality.
+*   **Dynamic Resolution/FPS**: Switch between 480p/720p/1080p and 30/60 FPS on the fly.
+*   **Moonlight-Style UI**: Simple, effective settings panel on Android.
+
+## 🏗 Architecture
+
+### Android App (Sender)
+*   **VideoSender Interface**: Decoupled network layer allowing easy protocol switching.
+*   **SRT Mode**: Uses `SrtClient` for pushed streams.
+*   **RTSP Mode**: Uses custom `TinyRtspKt` library.
+*   **CameraX + MediaCodec**: Hardware-accelerated capturing and encoding.
+*   **Latency Tuning**: 
+    - Forced `KEY_LATENCY=0` for immediate frame delivery.
+    - Optimized 1s GOP and high-priority encoding threads.
+*   **Automated Stability**: Full JUnit 5 + MockK unit test coverage for core logic (`PacketDuplicator`, `ImageUtils`, etc.).
+
+### Linux Bridge (Receiver)
+*   **Rust + GStreamer**: High-performance pipeline management.
+*   **Modular Design**:
+    - `config`: Robust CLI argument parsing.
+    - `state`: Thread-safe bridge state management and frame pushing.
+    - `pipeline`: Dynamic GStreamer string generation with `videoflip` rotation support.
+    - `utils`: System-level tools (mDNS, `v4l2loopback` auto-loading, plugin checks).
+*   **Pipeline Strategy**:
+    *   **Caps Lockdown**: Forces `appsrc` to a fixed format (I420 1080p).
+    *   **Low Latency Decoder**: FFmpeg decoders tuned with balanced buffering (30ms) for high response speed.
+*   **Stability**: Unit testing for config parsing and pipeline generation.
+
+## 🚀 Getting Started
+
+### Prerequisites
+1.  **Linux**: `v4l2loopback` kernel module installed.
+    ```bash
+    sudo modprobe v4l2loopback video_nr=10 card_label="DroidCam" exclusive_caps=1
+    sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+    ```
+2.  **Android**: Device with Android 7.0+ (HEVC requires newer hardware).
+
+### Running
+
+1.  **Start Linux Bridge**:
+    ```bash
+    cd linux-app
+    cargo run --release -- -4 5000 -5 5001 --device /dev/video10
+    ```
+
+2.  **Start Android App**:
+    *   Enter Linux IP.
+    *   Select Resolution/FPS/Codec.
+    *   Click **Apply Settings**.
+
+## 🐞 Debugging Guide (AI-Driven Workflow)
+
+To maximize efficiency, the AI Agent now handles the entire build and deployment pipeline.
+
+### Roles
+*   **🤖 AI Agent**:
+    *   **Builds**: Compiles APKs (`./gradlew assembleDebug`) and Rust binaries.
+    *   **Deploys**: Installs APKs via ADB (`adb install -r ...`).
+    *   **Runs**: Starts the app (`adb shell am start ...`) and the Linux bridge.
+    *   **Monitors**: Reads logs directly via `adb logcat` or cargo output.
+*   **👤 User**:
+    *   **Visual Check**: Verifies if the video is visible on the phone or browser.
+    *   **Physical Intervention**: Restarts the device if ADB freezes.
+
+## 🛠 Development History
+*   **Jan 2026**:
+    *   **Phase 22: Stability & Refactor (稳定性与重构)**:
+        - **Android**: Integrated JUnit 5/MockK, extracted `ImageUtils`, fixed UI state sync bugs.
+        - **Linux**: Modularized `main.rs` into sub-modules (`config`, `state`, `pipeline`, `utils`).
+    *   **Phase 23: SRT Performance Tuning (SRT 性能优化)**:
+        - **Latency**: Implemented `KEY_LATENCY` flags and optimized SRT buffering (30ms).
+        - **Orientation**: Fixed rotation issues in the Linux Bridge pipeline.
+
+*   **Agent Sync & Handover**
+> **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
+
+*   **Last Agent**: Antigravity
+*   **Timestamp**: Jan 4, 2026 (Phase 23 Completed)
+*   **Current Status**: 
+    *   ✅ **Phase 22**: Unit Testing & Modularization Completed.
+    *   ✅ **Phase 23**: Low-Latency SRT Tuning & Rotation Fix Completed.
+*   **Next Task**:
+    *   **Objective**: Maintenance or new features (e.g., Audio support or WebRTC re-visit).
+    *   **Instruction**: System is stable with solid test coverage and modular architecture. 
 
 ---
-
-## 🔥 Key Features
-
-- **Multi-Protocol Power**:
-  - **SRT (Caller)**: Optimized for Linux `v4l2loopback`. Minimal latency, high resilience.
-  - **RTSP (Server)**: Acts as a standard IP Camera. Plug-and-play with VLC, OBS, and NVRs.
-  - **MJPEG (HTTP)**: Universal fallback mode. Works in any browser without plugins.
-  - **Broadcast Mode**: Stream to SRT and RTSP **simultaneously** from a single hardware encoder.
-- **Auto-Discovery (mDNS)**: One-click connection. No more manual IP typing - the app automatically finds the Linux bridge.
-- **Service Mode**: Supports true background/screen-off streaming. Save battery and prevent accidental touches.
-- **Auto-Rotation**: Linux bridge automatically rotates landscape camera feeds to portrait, ensuring correct orientation for desktop apps.
-- **"Caps Lockdown" Architecture**: Seamlessly switch between **H.264**, **H.265 (HEVC)**, and **MJPEG** at runtime without freezing the Linux virtual camera device.
-- **Always-On SMPTE Bars**: Automatically displays professional color bars when the stream is disconnected.
-- **Ultra-Low Latency**: Custom tuned `MediaCodec` parameters for <50ms glass-to-glass latency.
-- **Hardware Accelerated**: Full utilization of Android hardware encoders.
-- **Plug-and-Play Linux Bridge**: Auto-loads kernel modules (`v4l2loopback`) on startup.
-
-## 🏗 Project Structure
-
-- **`/android-app`**: CameraX + MediaCodec/MJPEG sender.
-- **`/linux-app`**: Rust + GStreamer bridge to feed `/dev/videoX`.
-
-## 🚀 Quick Start (Linux Bridge)
-
-1. **Install Dependencies**:
-   ```bash
-   sudo modprobe v4l2loopback video_nr=10 card_label="DroidV4L2" exclusive_caps=1
-   sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
-   ```
-2. **Run Bridge**:
-   ```bash
-   cd linux-app
-   cargo run --release -- -4 5000 -5 5001 --device /dev/video10
-   ```
-   *(Optional) To enable MJPEG support:* `cargo run --release -- --mjpeg http://PHONE_IP:8080/`
-3. **Open App**: Select **SRT**, **RTSP**, or **MJPEG**, enter your IP, and hit **Apply**.
-
----
-
-<a name="中文说明"></a>
-
-## 🔥 核心特性
-
-- **多协议支持**:
-  - **SRT (Caller)**: 专为 Linux `v4l2loopback` 设计，极低延迟，网络抗抖动强。
-  - **RTSP (Server)**: 让手机变成标准 IP Camera，支持 VLC、OBS、群晖 NAS。
-  - **MJPEG (HTTP)**: 通用兼容模式，无需插件即可在任何浏览器中播放。
-  - **广播模式 (Broadcast)**: 支持一鱼两吃，同时推流到 SRT 和 RTSP。
-- **自动发现 (Auto-Discovery)**: 内置 mDNS 客户端，一键自动搜索 Linux Bridge IP。
-- **服务模式 (Service Mode)**: 支持真正的后台推流和息屏推流，省电防误触。
-- **自动旋转 (Auto-Rotation)**: Linux 端自动将横屏采集的画面旋转为竖屏，完美适配桌面应用。
-- **"Caps Lockdown" 架构**: 支持运行时无缝切换 H.264/H.265/MJPEG，Linux 虚拟摄像头永不掉线。
-- **动态 SMPTE 彩条**: 断流时自动填充彩条，防止黑屏。
-- **极低延迟**: 深度优化的参数，实现 <50ms 端到端延迟。
-- **硬件加速**: 充分利用 Android 硬件编码器。
-- **即插即用**: Linux 端自动加载 `v4l2loopback` 模块。
-
-## 🏗 项目结构
-
-- **`/android-app`**: 基于 CameraX 和 MediaCodec 的发送端，具备协议抽象层。
-- **`/linux-app`**: 基于 Rust 和 GStreamer 的桥接端，负责将流写入 `/dev/videoX`。
-
----
-*Maintained by cagedbird043. Built for performance.*
+*Project maintained by cagedbird043.*
