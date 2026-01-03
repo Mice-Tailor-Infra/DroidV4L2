@@ -70,5 +70,18 @@
     *   **UX Upgrade**: Implemented SMPTE color bars as an "Always-On" screensaver for idle states.
     *   Implemented intelligent Watchdog to prevent caps thrashing.
 
+## 🤖 Agent Sync & Handover
+> **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
+
+*   **Last Agent**: Gemini
+*   **Timestamp**: Jan 3, 2026
+*   **Current Status**: 
+    *   ✅ **TinyRtspKt Migration**: Completed & Verified. The app now uses `com.github.Mice-Tailor-Infra:TinyRtspKt:v1.0.6`.
+    *   ✅ **Infrastructure**: `gradlew` and build scripts are fully patched.
+*   **Next Task (Handover to Antigravity)**:
+    *   **Objective**: Implement **Phase 3: Broadcast Mode**.
+    *   **Context**: We need a `PacketDuplicator` class (implementing `VideoSender`) to composite `SrtSender` and `RtspServerSender`.
+    *   **Instruction**: Modify `MainActivity` to instantiate this duplicator when the user selects the new "Broadcast" option. **No changes needed to `VideoEncoder`**.
+
 ---
 *Project maintained by cagedbird043.*
