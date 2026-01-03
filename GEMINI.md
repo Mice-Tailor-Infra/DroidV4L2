@@ -1,6 +1,10 @@
 # DroidV4L2: High-Performance Android to Linux Virtual Camera
 
-**DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux. It supports multiple protocols including SRT for pro-grade Linux integration and RTSP for universal compatibility with players like VLC and OBS.
+**DroidV4L2** turns your Android device into a low-latency, high-quality wireless webcam for Linux.
+
+## 🌏 Protocol / 协议
+*   **Conversation**: 必须使用 **中文 (Chinese)** 与用户交流。
+*   **Documentation**: 文档与提交记录需使用 **中英双语 (Bilingual: English & Chinese)**。
 
 ## 🌟 Key Features
 
