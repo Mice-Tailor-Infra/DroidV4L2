@@ -170,9 +170,9 @@ class StreamingService : LifecycleService() {
 
     fun attachPreview(previewView: PreviewView?) {
         viewFinder = previewView
-        if (isStreaming) {
-            bindCamera()
-        }
+        // Dynamic Surface Attachment: Just set the provider, no re-bind needed!
+        // This is safe to call even if viewPreview is null (it will be set when streaming starts)
+        viewPreview?.setSurfaceProvider(viewFinder?.surfaceProvider)
     }
 
     private fun bindCamera() {
@@ -202,41 +202,32 @@ class StreamingService : LifecycleService() {
                                 request.provideSurface(it, cameraExecutor) {}
                             }
                         }
-                        try {
-                            // Only unbind all when initializing the core encoder stream for the
-                            // first time
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                    this,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    encoderPreview!!
-                            )
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Binding encoder failed", e)
-                        }
                     }
 
-                    // 2. Setup/Destroy UI Preview (ViewFinder)
+                    // 2. Setup Persistent View Preview (Always created, optionally attached)
+                    if (viewPreview == null) {
+                        viewPreview = Preview.Builder().setResolutionSelector(resSelector).build()
+                    }
+
+                    // Bind the surface provider if viewFinder is currently available
                     if (viewFinder != null) {
-                        if (viewPreview == null) {
-                            viewPreview =
-                                    Preview.Builder().setResolutionSelector(resSelector).build()
-                            viewPreview?.setSurfaceProvider(viewFinder?.surfaceProvider)
-                        }
-                        try {
-                            cameraProvider.bindToLifecycle(
-                                    this,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    viewPreview!!
-                            )
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Binding viewPreview failed", e)
-                        }
-                    } else {
-                        viewPreview?.let {
-                            cameraProvider.unbind(it)
-                            viewPreview = null
-                        }
+                        viewPreview?.setSurfaceProvider(viewFinder?.surfaceProvider)
+                    }
+
+                    try {
+                        cameraProvider.unbindAll()
+                        // KEY FIX: Bind BOTH use cases at once.
+                        // CameraX will stream to both. If ViewPreview has no surface, it just drops
+                        // those frames.
+                        // But the pipeline stays ALIVE.
+                        cameraProvider.bindToLifecycle(
+                                this,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                encoderPreview,
+                                viewPreview
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Binding failed", e)
                     }
 
                     // Recovery keyframe
