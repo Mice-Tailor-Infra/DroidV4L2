@@ -79,7 +79,8 @@ class MainActivity : AppCompatActivity() {
                 ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecOptions)
         spinnerCodec.setSelection(codecOptions.indexOf(prefs.getString("codec", "H.264")))
 
-        val protocolOptions = arrayOf("SRT (Caller)", "RTSP (Server)", "Broadcast (SRT + RTSP)")
+        val protocolOptions =
+                arrayOf("SRT (Caller)", "RTSP (Server)", "Broadcast (SRT + RTSP)", "WebRTC")
         spinnerProtocol.adapter =
                 ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolOptions)
         spinnerProtocol.setSelection(
@@ -216,7 +217,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!allPermissionsGranted()) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
+            ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+                    10
+            )
         }
     }
 
@@ -281,7 +286,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun allPermissionsGranted() =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-                    PackageManager.PERMISSION_GRANTED
+                    PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                            PackageManager.PERMISSION_GRANTED
     override fun onDestroy() {
         super.onDestroy()
         // cameraExecutor is now in Service

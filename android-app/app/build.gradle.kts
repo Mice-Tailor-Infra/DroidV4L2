@@ -30,6 +30,15 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 repositories {
@@ -60,5 +69,5 @@ dependencies {
 
     // Phase 5: WebRTC
     implementation("org.nanohttpd:nanohttpd:2.3.1")
-    implementation("com.github.GetStream:stream-webrtc-android:1.3.1")
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
 }

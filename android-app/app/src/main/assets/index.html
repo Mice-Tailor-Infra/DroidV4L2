@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DroidV4L2 WebRTC</title>
+    <style>
+        body { margin: 0; background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; color: #fff; font-family: sans-serif; }
+        video { width: 100%; max-width: 1280px; height: auto; background: #111; }
+        .status { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">Connecting...</div>
+    <video id="remoteVideo" autoplay playsinline controls></video>
+
+    <script>
+        const pc = new RTCPeerConnection();
+        const status = document.getElementById('status');
+        
+        pc.ontrack = (event) => {
+            const video = document.getElementById('remoteVideo');
+            if (event.streams && event.streams[0]) {
+                video.srcObject = event.streams[0];
+                status.innerText = "Connected";
+            }
+        };
+
+        async function start() {
+            try {
+                // 1. Create Offer
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // Wait for ICE gathering to complete (or 2s timeout) to ensure candidates are included
+                if (pc.iceGatheringState !== 'complete') {
+                    await new Promise(resolve => {
+                        const check = () => {
+                            if (pc.iceGatheringState === 'complete') {
+                                pc.removeEventListener('icegatheringstatechange', check);
+                                resolve();
+                            }
+                        };
+                        pc.addEventListener('icegatheringstatechange', check);
+                        setTimeout(() => {
+                           pc.removeEventListener('icegatheringstatechange', check);
+                           resolve();
+                        }, 2000);
+                    });
+                }
+
+                // 2. Send Offer to Server
+                const response = await fetch('/offer', {
+                    method: 'POST',
+                    body: JSON.stringify(pc.localDescription)
+                });
+                
+                if (!response.ok) throw new Error("Server error");
+                
+                const answer = await response.json();
+                await pc.setRemoteDescription(answer);
+
+            } catch (e) {
+                status.innerText = "Error: " + e.message;
+                console.error(e);
+            }
+        }
+
+        start();
+    </script>
+</body>
+</html>

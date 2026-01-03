@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -31,6 +32,12 @@ class StreamingService : LifecycleService() {
 
     private val binder = LocalBinder()
     private lateinit var cameraExecutor: ExecutorService
+
+    private var packetDuplicator: PacketDuplicator? = null
+
+    // WebRTC
+    private var webRtcManager: WebRtcManager? = null
+    private var webServer: WebServer? = null
 
     private var videoEncoder: VideoEncoder? = null
     private var videoSender: VideoSender? = null
@@ -69,6 +76,10 @@ class StreamingService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Initialize WebRTC
+        webRtcManager = WebRtcManager(this)
+        webServer = WebServer(this, 8080, webRtcManager!!)
         createNotificationChannel()
     }
 
@@ -218,18 +229,41 @@ class StreamingService : LifecycleService() {
                         viewPreview?.setSurfaceProvider(viewFinder?.surfaceProvider)
                     }
 
+                    // 3. Setup ImageAnalysis for WebRTC
+                    val imageAnalysis =
+                            ImageAnalysis.Builder()
+                                    .setResolutionSelector(resSelector)
+                                    .setBackpressureStrategy(
+                                            ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                                    )
+                                    .build()
+
+                    imageAnalysis.setAnalyzer(cameraExecutor) { image ->
+                        webRtcManager?.onFrame(image)
+                    }
+
                     try {
                         cameraProvider.unbindAll()
-                        // KEY FIX: Bind BOTH use cases at once.
-                        // CameraX will stream to both. If ViewPreview has no surface, it just drops
-                        // those frames.
-                        // But the pipeline stays ALIVE.
-                        cameraProvider.bindToLifecycle(
-                                this,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
-                                encoderPreview,
-                                viewPreview
-                        )
+
+                        if (config.protocol == "WebRTC") {
+                            // Pure WebRTC Mode: Bind Analysis + View
+                            Log.i(TAG, "Mode: WebRTC Only. Binding ImageAnalysis + Preview")
+                            cameraProvider.bindToLifecycle(
+                                    this,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    viewPreview,
+                                    imageAnalysis
+                            )
+                        } else {
+                            // Standard Mode (RTSP/SRT): Bind Encoder + View
+                            Log.i(TAG, "Mode: Standard Streaming. Binding Encoder + Preview")
+                            cameraProvider.bindToLifecycle(
+                                    this,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    encoderPreview,
+                                    viewPreview
+                            )
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "Binding failed", e)
                     }
@@ -282,6 +316,7 @@ class StreamingService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        webServer?.stop()
         super.onDestroy()
         cameraExecutor.shutdown()
         stopStreaming()
