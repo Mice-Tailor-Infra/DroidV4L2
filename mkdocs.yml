@@ -37,16 +37,8 @@ plugins:
   - i18n:
       default_language: zh
       languages:
-        - zh: 
-            name: 中文
-            link: /zh/
-            build: true
-          locale: zh_CN
-        - en: 
-            name: English
-            link: /en/
-            build: true
-          locale: en_US
+        - zh: 中文
+        - en: English
       fallback_to_default: true
 
 markdown_extensions:
