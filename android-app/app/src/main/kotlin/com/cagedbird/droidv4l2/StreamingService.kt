@@ -254,12 +254,8 @@ class StreamingService : LifecycleService() {
                         } else if (config.protocol == "MJPEG (HTTP)") {
                             // MJPEG Handling
                             try {
-                                // YuvImage requires NV21.
-                                // ImageProxy is YUV_420_888.
-                                // We take the Y plane (0) and UV/VU planes.
-                                // If stride=2 (NV12/NV21), we can copy.
-                                // For speed, we just dump the buffer if compatible or do a naive
-                                // copy.
+                                // Log.v(TAG, "MJPEG: Frame received.
+                                // ${image.width}x${image.height}")
 
                                 val planes = image.planes
                                 val yBuffer = planes[0].buffer
@@ -271,45 +267,32 @@ class StreamingService : LifecycleService() {
                                 val vSize = vBuffer.remaining()
 
                                 // Construct NV21 byte array [Y...Y][V U V U...]
-                                val nv21 = ByteArray(ySize + uSize + vSize) // bit oversized maybe
+                                val nv21 = ByteArray(ySize + uSize + vSize)
 
                                 // Copy Y
                                 yBuffer.get(nv21, 0, ySize)
 
-                                // Copy V and U (Interleaved)
-                                // If ImageAnalysis outputs format YUV_420_888 with pixelStride=2,
-                                // typically it's NV12 (UVUV) or NV21 (VUVU).
-                                // Android standard is usually NV21 compatible if we are lucky?
-                                // Actually YUV_420_888 generic.
-                                // For 'YuvImage', we need NV21 (Y then VU).
-                                // If we have NV12 (Y then UV), colors are swapped.
+                                // Copy V and U. For MJPEG fallback, color accuracy is secondary.
+                                // We just need to fill the buffer to avoid crash.
 
-                                // Naive implementation: Copy V then U?
-                                // If we assume NV12 (UV), we actally want VUVU.
-                                // Let's just create a temporary NV21-ish buffer from the planes.
-                                val uvHeight = image.height / 2
-                                val uvWidth = image.width / 2
-                                val pixelStride = planes[1].pixelStride
-                                val rowStride = planes[1].rowStride
+                                // Fast/Safe copy: just verify boundaries
+                                val uvSize = nv21.size - ySize
+                                if (uvSize > 0) {
+                                    // Try to fill with whatever we have from V buffer (NV21 expects
+                                    // V first)
+                                    val vLen = minOf(vBuffer.remaining(), uvSize)
+                                    vBuffer.get(nv21, ySize, vLen)
 
-                                // This is slow in Java.
-                                // FAST PATH: If we don't care about perfect color, pass Y + UV.
-                                // Let's try direct YuvImage with "NV21" format (17).
-                                // We need a single byte array.
+                                    // If we still have space, try U (logic is loose but won't
+                                    // crash)
+                                    val remaining = uvSize - vLen
+                                    if (remaining > 0) {
+                                        val uLen = minOf(uBuffer.remaining(), remaining)
+                                        uBuffer.get(nv21, ySize + vLen, uLen)
+                                    }
+                                }
 
-                                // Hack: If we assume NV21 (standard Android camera picture),
-                                // we can just get the whole buffer? No, CameraX abstraction
-                                // prevents this.
-
-                                // Let's just copy V then U for valid NV21.
-                                val vSrc = vBuffer
-                                val uSrc = uBuffer
-                                var pos = ySize
-
-                                // Just copy generic way (slow but works) -> actually too slow for
-                                // 30fps?
-                                // Let's compress only every 3rd frame (10 FPS)
-
+                                val out = java.io.ByteArrayOutputStream()
                                 val yuvImage =
                                         android.graphics.YuvImage(
                                                 nv21,
@@ -318,42 +301,15 @@ class StreamingService : LifecycleService() {
                                                 image.height,
                                                 null
                                         )
-
-                                // We need to fill nv21 first.
-                                // Check if we can do a bulk copy.
-                                // If vBuffer contains [V, U, V, U...], we can just copy it after Y?
-                                // If it is NV12, it is [U, V, U, V...].
-                                // If we treat NV12 as NV21, Blue and Red are swapped.
-                                // This is acceptble for fallback.
-
-                                // Let's assume NV12 (UV) from CameraX.
-                                // We copy the UV block.
-                                // uBuffer usually tracks the whole Plane.
-                                // If Planes are contiguous in memory (often are in legacy but not
-                                // guaranteed in CameraX),
-                                // we can't assume.
-
-                                // Quickest hack: Copy Y, then Copy U (as UV block).
-                                // Result: NV12. YuvImage expects NV21. -> Swapped colors.
-                                // User sees Blue faces. Better than no faces.
-
-                                val uvSize = image.width * image.height / 2
-                                if (pixelStride == 2) {
-                                    // Likely interleaved.
-                                    // uBuffer is usually the start.
-                                    uBuffer.get(nv21, ySize, minOf(uSize, uvSize))
-                                } else {
-                                    // Planar? I420. YuvImage does NOT support I420.
-                                    // We must interleave. Too slow.
-                                }
-
-                                val out = java.io.ByteArrayOutputStream()
+                                // High compression for speed
                                 yuvImage.compressToJpeg(
                                         android.graphics.Rect(0, 0, image.width, image.height),
                                         50,
                                         out
                                 )
                                 val jpegBytes = out.toByteArray()
+                                // Log.i(TAG, "MJPEG: Compressed ${jpegBytes.size} bytes. Sending to
+                                // server.")
                                 webServer?.updateFrame(jpegBytes)
                             } catch (e: Exception) {
                                 Log.e(TAG, "MJPEG error", e)
