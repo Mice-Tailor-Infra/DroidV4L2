@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
 use std::io::Write;
+use std::process::Command;
+use std::path::Path;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -29,6 +31,10 @@ struct BridgeState {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // --- 0. Auto-Modprobe (Phase 4) ---
+    check_and_load_v4l2loopback(&args.device);
+
     gst::init().context("GStreamer init failed")?;
 
     println!("[SYSTEM] GStreamer initialized.");
@@ -223,5 +229,43 @@ fn push_sample_to_appsrc(s: &mut BridgeState, sample: gst::Sample, _is_keepalive
         }
         let _ = s.appsrc.push_buffer(new_buffer);
         s.timestamp_ns += 33_333_333;
+    }
+}
+
+fn check_and_load_v4l2loopback(device_path: &str) {
+    if Path::new(device_path).exists() {
+        println!("[Check] Device {} exists.", device_path);
+        return;
+    }
+
+    println!("[Warning] Device {} NOT found. Attempting to load v4l2loopback...", device_path);
+    println!("[System] Requesting sudo privileges via pkexec...");
+
+    // Extract video_nr from /dev/video10 -> 10
+    let video_nr = device_path.replace("/dev/video", "");
+    
+    // Command: pkexec modprobe v4l2loopback video_nr=10 card_label="DroidV4L2" exclusive_caps=1
+    let status = Command::new("pkexec")
+        .arg("modprobe")
+        .arg("v4l2loopback")
+        .arg(format!("video_nr={}", video_nr))
+        .arg("card_label=DroidV4L2")
+        .arg("exclusive_caps=1")
+        .status();
+
+    match status {
+        Ok(exit_status) => {
+            if exit_status.success() {
+                println!("[System] v4l2loopback loaded successfully.");
+                // Give udev a moment to create the device node
+                thread::sleep(Duration::from_millis(500));
+            } else {
+                eprintln!("[Error] Failed to load v4l2loopback (exit code: {:?})", exit_status.code());
+                // Don't panic here, let GStreamer fail typically if device is still missing
+            }
+        },
+        Err(e) => {
+            eprintln!("[Error] Failed to execute pkexec: {}", e);
+        }
     }
 }
