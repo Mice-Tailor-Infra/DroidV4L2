@@ -58,6 +58,38 @@
     *   Select Resolution/FPS/Codec.
     *   Click **Apply Settings**.
 
+## 🐞 Debugging Guide (AI + User Workflow)
+
+To ensure efficiency, we follow a strict **"AI Builds, User Runs"** protocol.
+
+### Roles
+*   **🤖 AI Agent**:
+    *   Compiles Android APK (`./gradlew assembleDebug`).
+    *   Compiles Linux Rust Bridge (`cargo build --release`).
+    *   Fixes code based on logs provided by the user.
+*   **👤 User**:
+    *   Installs the APK on the device (`adb install ...`).
+    *   Runs the Linux Bridge.
+    *   **Opens Two Terminals** to monitor the system live.
+
+### Recommended Terminal Setup
+
+#### Terminal 1: Linux Bridge (Receiver)
+Runs the Rust application to receive the stream.
+```bash
+cd linux-app
+# Use RUST_LOG=info or debug for more details
+RUST_LOG=info cargo run --release -- -4 5000 -5 5001 --device /dev/video10
+```
+
+#### Terminal 2: Android Logs (Sender)
+Monitors the Android device output via ADB.
+```bash
+adb logcat -c  # Clear old logs
+# Filter for key tags: Main App, SRT, RTSP, Encoder, and System Errors
+adb logcat -v color -s DroidV4L2 SrtSender TinyRtspKt VideoEncoder System.err
+```
+
 ## 🛠 Development History
 *   **Jan 2026**:
     *   **Major Architecture Shift**: Migrated RTSP Server to **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)**.
