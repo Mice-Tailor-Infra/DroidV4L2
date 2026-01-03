@@ -35,8 +35,7 @@ class StreamingService : LifecycleService() {
 
     private var packetDuplicator: PacketDuplicator? = null
 
-    // WebRTC
-    private var webRtcManager: WebRtcManager? = null
+    // MJPEG Server
     private var webServer: WebServer? = null
 
     private var videoEncoder: VideoEncoder? = null
@@ -77,8 +76,8 @@ class StreamingService : LifecycleService() {
         super.onCreate()
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        // WebServer starts immediately, but WebRTC manager is lazy loaded
-        webServer = WebServer(this, 8080, null)
+        // WebServer starts immediately
+        webServer = WebServer(this, 8080)
         createNotificationChannel()
     }
 
@@ -238,20 +237,7 @@ class StreamingService : LifecycleService() {
                                     .build()
 
                     imageAnalysis.setAnalyzer(cameraExecutor) { image ->
-                        if (config.protocol == "WebRTC") {
-                            // Lazy Init WebRTC
-                            if (webRtcManager == null) {
-                                try {
-                                    Log.i(TAG, "Initializing WebRTC Manager...")
-                                    webRtcManager = WebRtcManager(this@StreamingService)
-                                    webServer?.setWebRtcManager(webRtcManager!!)
-                                } catch (e: Throwable) {
-                                    Log.e(TAG, "Failed to initialize WebRTC", e)
-                                    // Fallback or error?
-                                }
-                            }
-                            webRtcManager?.onFrame(image)
-                        } else if (config.protocol == "MJPEG (HTTP)") {
+                        if (config.protocol == "MJPEG (HTTP)") {
                             // MJPEG Handling
                             try {
                                 // Log.v(TAG, "MJPEG: Frame received.
@@ -354,9 +340,9 @@ class StreamingService : LifecycleService() {
                     try {
                         cameraProvider.unbindAll()
 
-                        if (config.protocol == "WebRTC" || config.protocol == "MJPEG (HTTP)") {
-                            // Pure WebRTC or MJPEG Mode: Bind Analysis + View
-                            Log.i(TAG, "Mode: WebRTC/MJPEG. Binding ImageAnalysis + Preview")
+                        if (config.protocol == "MJPEG (HTTP)") {
+                            // MJPEG Mode: Bind Analysis + View
+                            Log.i(TAG, "Mode: MJPEG. Binding ImageAnalysis + Preview")
                             cameraProvider.bindToLifecycle(
                                     this,
                                     CameraSelector.DEFAULT_BACK_CAMERA,

@@ -5,15 +5,7 @@ import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
 
-class WebServer(
-        private val context: Context,
-        port: Int,
-        private var webRtcManager: WebRtcManager?
-) : NanoHTTPD(port) {
-
-    fun setWebRtcManager(manager: WebRtcManager) {
-        this.webRtcManager = manager
-    }
+class WebServer(private val context: Context, port: Int) : NanoHTTPD(port) {
 
     private val TAG = "WebServer"
 
@@ -38,8 +30,6 @@ class WebServer(
         return when {
             uri == "/" -> serveIndexHtml()
             uri == "/stream" -> serveMjpegStream()
-            uri == "/offer" && method == Method.POST -> handleOffer(session)
-            uri == "/candidate" && method == Method.POST -> handleCandidate(session)
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
         }
     }
@@ -131,41 +121,5 @@ class WebServer(
                     "Internal Error: index.html not found"
             )
         }
-    }
-
-    private fun handleOffer(session: IHTTPSession): Response {
-        val map = HashMap<String, String>()
-        session.parseBody(map)
-        val json =
-                map["postData"]
-                        ?: return newFixedLengthResponse(
-                                Response.Status.BAD_REQUEST,
-                                MIME_PLAINTEXT,
-                                "Missing body"
-                        )
-
-        val answer = webRtcManager?.handleOffer(json)
-
-        return if (answer != null) {
-            newFixedLengthResponse(Response.Status.OK, "application/json", answer)
-        } else {
-            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "WebRTC Error")
-        }
-    }
-
-    private fun handleCandidate(session: IHTTPSession): Response {
-        val map = HashMap<String, String>()
-        session.parseBody(map)
-        val json =
-                map["postData"]
-                        ?: return newFixedLengthResponse(
-                                Response.Status.BAD_REQUEST,
-                                MIME_PLAINTEXT,
-                                "Missing body"
-                        )
-
-        // TODO: Pass candidate to WebRTC Manager
-
-        return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"ok\"}")
     }
 }

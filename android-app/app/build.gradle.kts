@@ -67,7 +67,6 @@ dependencies {
     // Our own open source library!
     implementation("com.github.Mice-Tailor-Infra:TinyRtspKt:v1.0.6")
 
-    // Phase 5: WebRTC
+    // HTTP Server
     implementation("org.nanohttpd:nanohttpd:2.3.1")
-    implementation("io.getstream:stream-webrtc-android:1.3.10")
 }
