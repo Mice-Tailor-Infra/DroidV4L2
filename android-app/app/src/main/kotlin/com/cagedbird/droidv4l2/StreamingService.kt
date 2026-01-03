@@ -65,6 +65,7 @@ class StreamingService : LifecycleService() {
 
     inner class LocalBinder : Binder() {
         fun getService(): StreamingService = this@StreamingService
+        fun getStreamingStatus(): Boolean = isStreaming
     }
 
     override fun onBind(intent: Intent): IBinder {

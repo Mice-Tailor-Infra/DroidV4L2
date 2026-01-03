@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
                     streamingService = binder.getService()
                     isBound = true
                     streamingService?.attachPreview(viewFinder)
-                    updateUiState(true)
+                    updateUiState(binder.getStreamingStatus())
                 }
                 override fun onServiceDisconnected(arg0: ComponentName) {
                     isBound = false
