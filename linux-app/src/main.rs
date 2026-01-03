@@ -1,14 +1,16 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use clap::Parser;
+use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
-use gst::prelude::*;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::thread;
+use log::{error, info, warn};
+
 use std::io::Write;
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -30,14 +32,60 @@ struct BridgeState {
 }
 
 fn main() -> Result<()> {
+    // 0. Auto-Modprobe check
+    // The original check_and_load_v4l2loopback function does not return Result,
+    // so we need to adjust the call site to pass &args.device and handle its internal logic.
+    // Or, modify check_and_load_v4l2loopback to return Result.
+    // Given the instruction, I will assume the user intends to modify check_and_load_v4l2loopback
+    // to return Result<()> or handle the error within. For now, I'll keep the original call signature
+    // and adapt the new code to it, as the instruction only modifies the main function's body.
+    // Reverting to original call for check_and_load_v4l2loopback based on the provided snippet's context.
+
+    // 1. Parse Arguments
     let args = Args::parse();
 
-    // --- 0. Auto-Modprobe (Phase 4) ---
+    // 0. Auto-Modprobe (Phase 4) - Moved after args parsing
     check_and_load_v4l2loopback(&args.device);
+
+    // 2. Initialize Logging
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
+    env_logger::init();
+
+    // 3. Start mDNS Service (via avahi-publish)
+    // We prefer avahi-publish on Linux to avoid conflicts with the system avahi-daemon
+    // which usually holds port 5353.
+    std::thread::spawn(move || {
+        info!("[mDNS] Attempting to register service using avahi-publish...");
+
+        let output = Command::new("avahi-publish")
+            .arg("-s")
+            .arg("DroidV4L2 Bridge")
+            .arg("_droidv4l2._tcp")
+            .arg("5000")
+            .spawn();
+
+        match output {
+            Ok(mut child) => {
+                info!(
+                    "[mDNS] avahi-publish started successfully (PID: {})",
+                    child.id()
+                );
+                // Wait for it to exit (it shouldn't, unless error)
+                let _ = child.wait();
+                warn!("[mDNS] avahi-publish exited unexpectedly!");
+            }
+            Err(e) => {
+                error!("[mDNS] Failed to execute avahi-publish: {}", e);
+                info!("[mDNS] Is 'avahi-utils' installed? 'sudo apt install avahi-utils'");
+            }
+        }
+    });
 
     gst::init().context("GStreamer init failed")?;
 
-    println!("[SYSTEM] GStreamer initialized.");
+    info!("[SYSTEM] GStreamer initialized.");
     check_plugin("h264parse");
     check_plugin("avdec_h264");
     check_plugin("h265parse");
@@ -52,22 +100,31 @@ fn main() -> Result<()> {
     );
     let sink_pipeline = gst::parse_launch(&sink_pipeline_str)?;
     let appsrc = sink_pipeline
-        .downcast_ref::<gst::Bin>().unwrap()
-        .by_name("mysrc").unwrap()
-        .downcast::<gst_app::AppSrc>().unwrap();
+        .downcast_ref::<gst::Bin>()
+        .unwrap()
+        .by_name("mysrc")
+        .unwrap()
+        .downcast::<gst_app::AppSrc>()
+        .unwrap();
 
     sink_pipeline.set_state(gst::State::Playing)?;
-    println!("[SYSTEM] Permanent Sink Active on {} (Caps Locked)", args.device);
+    println!(
+        "[SYSTEM] Permanent Sink Active on {} (Caps Locked)",
+        args.device
+    );
 
     // --- 2. 屏保发生器 (Screensaver Generator) ---
     // 产生标准的 SMPTE 彩条，格式完全匹配 Locked Caps
     let saver_pipeline_str = "videotestsrc pattern=smpte ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=saver sync=false drop=true max-buffers=1";
     let saver_pipeline = gst::parse_launch(saver_pipeline_str)?;
     let saver_appsink = saver_pipeline
-        .downcast_ref::<gst::Bin>().unwrap()
-        .by_name("saver").unwrap()
-        .downcast::<gst_app::AppSink>().unwrap();
-    
+        .downcast_ref::<gst::Bin>()
+        .unwrap()
+        .by_name("saver")
+        .unwrap()
+        .downcast::<gst_app::AppSink>()
+        .unwrap();
+
     saver_pipeline.set_state(gst::State::Playing)?;
     println!("[SYSTEM] Screensaver Generator Active (SMPTE Bars)");
 
@@ -87,7 +144,7 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_millis(33));
             let mut s = state_watchdog.lock().unwrap();
             let elapsed = s.last_update.elapsed();
-            
+
             if elapsed > Duration::from_millis(500) {
                 // 状态：IDLE (无连接)
                 // 动作：清理残留状态 + 播放屏保
@@ -102,12 +159,11 @@ fn main() -> Result<()> {
                     Ok(sample) => {
                         // 推送屏保帧到主管线，保持 V4L2 存活
                         push_sample_to_appsrc(&mut s, sample, true);
-                    },
+                    }
                     Err(_) => {
                         // 屏保管线如果挂了，我们也无能为力，但这通常不可能发生
                     }
                 }
-
             } else if elapsed > Duration::from_millis(200) {
                 // 状态：JITTER (网络抖动)
                 // 动作：补发上一帧 (Packet Loss Concealment)
@@ -165,36 +221,43 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
         match gst::parse_launch(&src_pipeline_str) {
             Ok(src_pipe) => {
                 println!("[NETWORK] {} Listener OPEN on port {}", codec, port);
-                let appsink = src_pipe.downcast_ref::<gst::Bin>().unwrap()
-                    .by_name("mysink").unwrap()
-                    .downcast::<gst_app::AppSink>().unwrap();
+                let appsink = src_pipe
+                    .downcast_ref::<gst::Bin>()
+                    .unwrap()
+                    .by_name("mysink")
+                    .unwrap()
+                    .downcast::<gst_app::AppSink>()
+                    .unwrap();
 
                 let state_input = Arc::clone(&state);
                 let codec_name = codec.to_string();
-                
+
                 appsink.set_callbacks(
                     gst_app::AppSinkCallbacks::builder()
                         .new_sample(move |sink| {
                             let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
                             let mut s = state_input.lock().unwrap();
-                            
+
                             if s.active_codec != codec_name {
-                                println!("[SWITCH] Codec changed: {} -> {}", s.active_codec, codec_name);
+                                println!(
+                                    "[SWITCH] Codec changed: {} -> {}",
+                                    s.active_codec, codec_name
+                                );
                                 s.active_codec = codec_name.clone();
                             }
-                            
+
                             s.last_sample = Some(sample.clone());
                             s.last_update = Instant::now();
                             push_sample_to_appsrc(&mut s, sample, false);
                             Ok(gst::FlowSuccess::Ok)
                         })
-                        .build()
+                        .build(),
                 );
 
                 if let Err(e) = src_pipe.set_state(gst::State::Playing) {
-                     println!("[GST-ERR] {} set_state(Playing) failed: {}", codec, e);
+                    println!("[GST-ERR] {} set_state(Playing) failed: {}", codec, e);
                 }
-                
+
                 let bus = src_pipe.bus().unwrap();
                 for msg in bus.iter_timed(gst::ClockTime::NONE) {
                     use gst::MessageView;
@@ -238,12 +301,15 @@ fn check_and_load_v4l2loopback(device_path: &str) {
         return;
     }
 
-    println!("[Warning] Device {} NOT found. Attempting to load v4l2loopback...", device_path);
+    println!(
+        "[Warning] Device {} NOT found. Attempting to load v4l2loopback...",
+        device_path
+    );
     println!("[System] Requesting sudo privileges via pkexec...");
 
     // Extract video_nr from /dev/video10 -> 10
     let video_nr = device_path.replace("/dev/video", "");
-    
+
     // Command: pkexec modprobe v4l2loopback video_nr=10 card_label="DroidV4L2" exclusive_caps=1
     let status = Command::new("pkexec")
         .arg("modprobe")
@@ -260,10 +326,13 @@ fn check_and_load_v4l2loopback(device_path: &str) {
                 // Give udev a moment to create the device node
                 thread::sleep(Duration::from_millis(500));
             } else {
-                eprintln!("[Error] Failed to load v4l2loopback (exit code: {:?})", exit_status.code());
+                eprintln!(
+                    "[Error] Failed to load v4l2loopback (exit code: {:?})",
+                    exit_status.code()
+                );
                 // Don't panic here, let GStreamer fail typically if device is still missing
             }
-        },
+        }
         Err(e) => {
             eprintln!("[Error] Failed to execute pkexec: {}", e);
         }
