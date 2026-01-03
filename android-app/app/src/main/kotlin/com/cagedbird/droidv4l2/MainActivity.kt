@@ -46,33 +46,40 @@ class MainActivity : AppCompatActivity() {
         val spinnerProtocol = findViewById<Spinner>(R.id.spinnerProtocol)
 
         val resOptions = arrayOf("720p", "1080p", "480p")
-        spinnerRes.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
+        spinnerRes.adapter =
+                ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resOptions)
         spinnerRes.setSelection(resOptions.indexOf(prefs.getString("res", "720p")))
 
         val fpsOptions = arrayOf("30", "60")
-        spinnerFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsOptions)
+        spinnerFps.adapter =
+                ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsOptions)
         spinnerFps.setSelection(fpsOptions.indexOf(prefs.getString("fps", "30")))
 
         val codecOptions = arrayOf("H.264", "H.265")
-        spinnerCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecOptions)
+        spinnerCodec.adapter =
+                ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecOptions)
         spinnerCodec.setSelection(codecOptions.indexOf(prefs.getString("codec", "H.264")))
 
-        val protocolOptions = arrayOf("SRT (Caller)", "RTSP (Server)")
-        spinnerProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolOptions)
-        spinnerProtocol.setSelection(protocolOptions.indexOf(prefs.getString("protocol", "SRT (Caller)")))
+        val protocolOptions = arrayOf("SRT (Caller)", "RTSP (Server)", "Broadcast (SRT + RTSP)")
+        spinnerProtocol.adapter =
+                ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolOptions)
+        spinnerProtocol.setSelection(
+                protocolOptions.indexOf(prefs.getString("protocol", "SRT (Caller)"))
+        )
 
         editIp.setText(prefs.getString("ip", "10.0.0.17"))
         editBitrate.setText(prefs.getInt("bitrate", 10).toString())
 
         findViewById<Button>(R.id.btnApply).setOnClickListener {
-            prefs.edit().putString("ip", editIp.text.toString())
-                .putInt("bitrate", editBitrate.text.toString().toIntOrNull() ?: 10)
-                .putString("res", spinnerRes.selectedItem.toString())
-                .putString("fps", spinnerFps.selectedItem.toString())
-                .putString("codec", spinnerCodec.selectedItem.toString())
-                .putString("protocol", spinnerProtocol.selectedItem.toString())
-                .apply()
-            
+            prefs.edit()
+                    .putString("ip", editIp.text.toString())
+                    .putInt("bitrate", editBitrate.text.toString().toIntOrNull() ?: 10)
+                    .putString("res", spinnerRes.selectedItem.toString())
+                    .putString("fps", spinnerFps.selectedItem.toString())
+                    .putString("codec", spinnerCodec.selectedItem.toString())
+                    .putString("protocol", spinnerProtocol.selectedItem.toString())
+                    .apply()
+
             Log.i(TAG, "[UI] Applying settings...")
             restartStreamingWithDelay()
         }
@@ -96,9 +103,7 @@ class MainActivity : AppCompatActivity() {
         stopStreaming()
         findViewById<TextView>(R.id.txtStatus).text = "Status: Resetting pipeline (200ms)..."
         // 极限优化：5ms 延迟，瞬间恢复
-        mainHandler.postDelayed({
-            startStreaming()
-        }, 200)
+        mainHandler.postDelayed({ startStreaming() }, 200)
     }
 
     private fun startStreaming() {
@@ -113,65 +118,121 @@ class MainActivity : AppCompatActivity() {
         val codecStr = prefs.getString("codec", "H.264")
         val protocolStr = prefs.getString("protocol", "SRT (Caller)")
 
-        val (w, h) = when(resStr) {
-            "1080p" -> 1920 to 1080
-            "480p" -> 640 to 480
-            else -> 1280 to 720
-        }
+        val (w, h) =
+                when (resStr) {
+                    "1080p" -> 1920 to 1080
+                    "480p" -> 640 to 480
+                    else -> 1280 to 720
+                }
 
         val isHevc = (codecStr == "H.265")
-        val mimeType = if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val mimeType =
+                if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
         val port = if (isHevc) 5001 else 5000
 
-        findViewById<TextView>(R.id.txtStatus).text = "Status: Initializing $codecStr via $protocolStr..."
+        findViewById<TextView>(R.id.txtStatus).text =
+                "Status: Initializing $codecStr via $protocolStr..."
 
-        videoEncoder = VideoEncoder(w, h, bitrate * 1_000_000, fps, mimeType) { data, ts, flags ->
-            videoSender?.send(data, ts, flags)
-        }
+        videoEncoder =
+                VideoEncoder(w, h, bitrate * 1_000_000, fps, mimeType) { data, ts, flags ->
+                    videoSender?.send(data, ts, flags)
+                }
         videoEncoder?.start()
 
-        if (protocolStr == "SRT (Caller)") {
-            videoSender = SrtSender(host, port, isHevc) {
-                runOnUiThread { findViewById<TextView>(R.id.txtStatus).text = "Status: CONNECTED (${videoSender?.getInfo()})" }
-                videoEncoder?.requestKeyFrame()
+        when (protocolStr) {
+            "SRT (Caller)" -> {
+                videoSender =
+                        SrtSender(host, port, isHevc) {
+                            runOnUiThread {
+                                findViewById<TextView>(R.id.txtStatus).text =
+                                        "Status: CONNECTED (${videoSender?.getInfo()})"
+                            }
+                            videoEncoder?.requestKeyFrame()
+                        }
             }
-        } else {
-            // RTSP Server Mode (Port 8554)
-            videoSender = RtspServerSender(8554, isHevc) {
-                runOnUiThread { 
-                    // 当有客户端(VLC)连接上来时，触发关键帧，确保秒开
-                    videoEncoder?.requestKeyFrame()
-                    Toast.makeText(this, "Client Connected!", Toast.LENGTH_SHORT).show()
-                }
+            "RTSP (Server)" -> {
+                videoSender =
+                        RtspServerSender(8554, isHevc) {
+                            runOnUiThread {
+                                videoEncoder?.requestKeyFrame()
+                                Toast.makeText(this, "Client Connected!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                findViewById<TextView>(R.id.txtStatus).text =
+                        "Server Online: ${videoSender?.getInfo()}"
             }
-            // RTSP Server 启动即就绪，直接显示地址
-            findViewById<TextView>(R.id.txtStatus).text = "Server Online: ${videoSender?.getInfo()}"
+            "Broadcast (SRT + RTSP)" -> {
+                val srtSender =
+                        SrtSender(host, port, isHevc) {
+                            runOnUiThread {
+                                val rtspInfo =
+                                        "rtsp://0.0.0.0:8554" // Approximate, actual IP might vary
+                                // but port is fixed
+                                findViewById<TextView>(R.id.txtStatus).text =
+                                        "Status: SRT Linked + RTSP Ready"
+                                videoEncoder?.requestKeyFrame()
+                            }
+                        }
+                val rtspSender =
+                        RtspServerSender(8554, isHevc) {
+                            runOnUiThread {
+                                videoEncoder?.requestKeyFrame()
+                                Toast.makeText(this, "RTSP Client Connected!", Toast.LENGTH_SHORT)
+                                        .show()
+                            }
+                        }
+                videoSender = PacketDuplicator(listOf(srtSender, rtspSender))
+                findViewById<TextView>(R.id.txtStatus).text = "Broadcast Online: SRT + RTSP"
+            }
         }
-        
+
         videoSender?.start()
         bindCamera(w, h)
     }
 
     private fun bindCamera(width: Int, height: Int) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val resSelector = ResolutionSelector.Builder()
-                .setResolutionStrategy(ResolutionStrategy(Size(width, height), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
-                .build()
+        cameraProviderFuture.addListener(
+                {
+                    val cameraProvider = cameraProviderFuture.get()
+                    val resSelector =
+                            ResolutionSelector.Builder()
+                                    .setResolutionStrategy(
+                                            ResolutionStrategy(
+                                                    Size(width, height),
+                                                    ResolutionStrategy
+                                                            .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                            )
+                                    )
+                                    .build()
 
-            val preview = Preview.Builder().setResolutionSelector(resSelector).build().also { it.setSurfaceProvider(viewFinder?.surfaceProvider) }
-            val encoderPreview = Preview.Builder().setResolutionSelector(resSelector).build()
-            
-            encoderPreview.setSurfaceProvider { request ->
-                videoEncoder?.getInputSurface()?.let { request.provideSurface(it, cameraExecutor) { } }
-            }
+                    val preview =
+                            Preview.Builder().setResolutionSelector(resSelector).build().also {
+                                it.setSurfaceProvider(viewFinder?.surfaceProvider)
+                            }
+                    val encoderPreview =
+                            Preview.Builder().setResolutionSelector(resSelector).build()
 
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, encoderPreview)
-            } catch (e: Exception) { Log.e(TAG, "Bind failed", e) }
-        }, ContextCompat.getMainExecutor(this))
+                    encoderPreview.setSurfaceProvider { request ->
+                        videoEncoder?.getInputSurface()?.let {
+                            request.provideSurface(it, cameraExecutor) {}
+                        }
+                    }
+
+                    try {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                                this,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                encoderPreview
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Bind failed", e)
+                    }
+                },
+                ContextCompat.getMainExecutor(this)
+        )
     }
 
     private fun stopStreaming() {
@@ -182,6 +243,11 @@ class MainActivity : AppCompatActivity() {
         videoEncoder = null
     }
 
-    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    override fun onDestroy() { super.onDestroy(); cameraExecutor.shutdown() }
+    private fun allPermissionsGranted() =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
 }

@@ -28,8 +28,10 @@
 - **Solution**: Implement a `PacketDuplicator` class implementing `VideoSender`.
   - **Single Encoder** -> **Packet Duplicator** -> **[SRT Sender + RTSP Server]**.
 - **Scenario**: Use the phone as a webcam for a Linux PC while simultaneously recording the feed via RTSP on a NAS.
+- [x] **Implemented**: Concurrent SRT + RTSP streaming via `PacketDuplicator` (Jan 2026).
 
 ### Phase 4: Ease of Use & Polish
+- **Auto-Modprobe**: Integrate `v4l2loopback` loading into the Linux app to eliminate manual `sudo modprobe` commands.
 - **Service Mode**: Run the server in a foreground Service to allow screen-off operation (battery saving) and background streaming.
 - **Auto-Discovery**: mDNS/Bonjour support so VLC/OBS can "find" the Android camera automatically.
 - **Web Interface**: A simple HTTP server on the phone to adjust settings remotely (Resolution, Bitrate, Focus) without touching the screen.
