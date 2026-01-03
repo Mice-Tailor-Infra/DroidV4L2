@@ -92,32 +92,25 @@ adb logcat -v color -s DroidV4L2 SrtSender TinyRtspKt VideoEncoder System.err
 
 ## 🛠 Development History
 *   **Jan 2026**:
-    *   **Phase 3: Broadcast Mode**:
-        - Implemented `PacketDuplicator` for concurrent SRT + RTSP streaming.
-        - Integrated "Broadcast" option into Main Activity.
-        - Verified compilation.
-    *   **Major Architecture Shift**: Migrated RTSP Server to **[TinyRtspKt](https://github.com/Mice-Tailor-Infra/TinyRtspKt)**.
-        - Solved H.265 "Illegal Temporal ID" issues.
-        - Implemented critical VPS/SPS/PPS injection.
-    *   Stabilized 5ms reconnection latency.
-    *   Fixed resolution switching using server-side `videoscale`.
-    *   Added H.265 support via dual-port architecture.
-    *   **Major Breakthrough**: Implemented "Caps Lockdown" to enable seamless runtime codec switching.
-    *   **UX Upgrade**: Implemented SMPTE color bars as an "Always-On" screensaver for idle states.
-    *   Implemented intelligent Watchdog to prevent caps thrashing.
+    *   **Phase 4: 易用性与打磨 (Ease of Use & Polish)**:
+        - **Auto-Modprobe**: Linux 端自动加载 `v4l2loopback` 模块。
+        - **Service Mode**: Android 端实现后台/息屏推流 (Foreground Service)。
+        - **Stability V3**: 实施 "Bind-Both-Always" 策略，彻底解决了切后台花屏和启动卡顿问题。
+        - **Auto-Discovery**: 实现了 mDNS 自动发现 (Linux `avahi-publish` + Android `NsdManager`)，一键连接。
 
 ## 🤖 Agent Sync & Handover
 > **Shared State for Multi-Agent Collaboration (Gemini <-> Antigravity)**
 
 *   **Last Agent**: Antigravity
-*   **Timestamp**: Jan 3, 2026
+*   **Timestamp**: Jan 3, 2026 (Phase 4 Completed)
 *   **Current Status**: 
-    *   ✅ **TinyRtspKt Migration**: Completed & Verified.
-    *   ✅ **Phase 3: Broadcast Mode**: Implemented. Users can now stream to SRT and RTSP simultaneously.
+    *   ✅ **Phase 3**: Broadcast Mode (SRT + RTSP 并发)。
+    *   ✅ **Phase 4**: 易用性与稳定性 (Service Mode, Auto-Find, Stability V3)。
+    *   ✨ **Ready**: 系统现在功能完备、稳定且易于使用。
 *   **Next Task**:
-    *   **Objective**: User Verification / Phase 4 (Ease of Use).
-    *   **Context**: Code is compiled. Waiting for user to run the app on device and provide logs (follow **Debugging Guide**!).
-    *   **Instruction**: If logs show packet loss or CPU strain, investigate `PacketDuplicator` threading model.
+    *   **Objective**: Phase 5 (WebRTC) 或 合并代码。
+    *   **Context**: 所有已知 bug 已修复，自动发现已验证通过。
+    *   **Instruction**: 建议合并到 `main` 分支。如果用户想继续，可以开始调研 WebRTC。
 
 ---
 *Project maintained by cagedbird043.*
