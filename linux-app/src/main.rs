@@ -21,6 +21,10 @@ struct Args {
     port_h265: u16,
     #[arg(short, long, default_value = "/dev/video10")]
     device: String,
+
+    /// Optional MJPEG Stream URL (e.g., http://192.168.1.5:8080/)
+    #[arg(long)]
+    mjpeg: Option<String>,
 }
 
 struct BridgeState {
@@ -32,19 +36,10 @@ struct BridgeState {
 }
 
 fn main() -> Result<()> {
-    // 0. Auto-Modprobe check
-    // The original check_and_load_v4l2loopback function does not return Result,
-    // so we need to adjust the call site to pass &args.device and handle its internal logic.
-    // Or, modify check_and_load_v4l2loopback to return Result.
-    // Given the instruction, I will assume the user intends to modify check_and_load_v4l2loopback
-    // to return Result<()> or handle the error within. For now, I'll keep the original call signature
-    // and adapt the new code to it, as the instruction only modifies the main function's body.
-    // Reverting to original call for check_and_load_v4l2loopback based on the provided snippet's context.
-
-    // 1. Parse Arguments
+    // 0. Parse Arguments FIRST
     let args = Args::parse();
 
-    // 0. Auto-Modprobe (Phase 4) - Moved after args parsing
+    // 1. Auto-Modprobe (Phase 4)
     check_and_load_v4l2loopback(&args.device);
 
     // 2. Initialize Logging
@@ -54,8 +49,6 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // 3. Start mDNS Service (via avahi-publish)
-    // We prefer avahi-publish on Linux to avoid conflicts with the system avahi-daemon
-    // which usually holds port 5353.
     std::thread::spawn(move || {
         info!("[mDNS] Attempting to register service using avahi-publish...");
 
@@ -90,10 +83,19 @@ fn main() -> Result<()> {
     check_plugin("avdec_h264");
     check_plugin("h265parse");
     check_plugin("avdec_h265");
-    check_plugin("videotestsrc"); // 检查屏保插件
+    check_plugin("videotestsrc"); // Check screensaver plugin
+
+    // Check MJPEG plugins if URL provided
+    if args.mjpeg.is_some() {
+        check_plugin("souphttpsrc");
+        check_plugin("multipartdemux");
+        check_plugin("jpegdec");
+    }
+
     std::io::stdout().flush().unwrap();
 
-    // --- 1. 持久 Sink 管线 (Caps Lockdown) ---
+    // --- 1. Persistent Sink Pipeline (Caps Lockdown) ---
+    // Caps Lockdown: Force I420 1080p output to V4L2
     let sink_pipeline_str = format!(
         "appsrc name=mysrc is-live=true format=time min-latency=0 caps=\"video/x-raw,format=I420,width=1920,height=1080,framerate=30/1,pixel-aspect-ratio=1/1\" ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080 ! v4l2sink device={} sync=false",
         args.device
@@ -113,8 +115,8 @@ fn main() -> Result<()> {
         args.device
     );
 
-    // --- 2. 屏保发生器 (Screensaver Generator) ---
-    // 产生标准的 SMPTE 彩条，格式完全匹配 Locked Caps
+    // --- 2. Screensaver Generator ---
+    // Standard SMPTE bars
     let saver_pipeline_str = "videotestsrc pattern=smpte ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=saver sync=false drop=true max-buffers=1";
     let saver_pipeline = gst::parse_launch(saver_pipeline_str)?;
     let saver_appsink = saver_pipeline
@@ -136,7 +138,7 @@ fn main() -> Result<()> {
         active_codec: "none".to_string(),
     }));
 
-    // --- 3. Watchdog 线程 (保活、清理、屏保) ---
+    // --- 3. Watchdog Thread (Keep-alive, Cleanup, Screensaver) ---
     let state_watchdog = Arc::clone(&state);
     thread::spawn(move || {
         loop {
@@ -146,27 +148,26 @@ fn main() -> Result<()> {
             let elapsed = s.last_update.elapsed();
 
             if elapsed > Duration::from_millis(500) {
-                // 状态：IDLE (无连接)
-                // 动作：清理残留状态 + 播放屏保
+                // State: IDLE (No connection)
                 if s.last_sample.is_some() {
-                    // println!("[WATCHDOG] Stream lost. Switching to screensaver.");
+                    // Start screensaver logic
                     s.last_sample = None;
                     s.active_codec = "none".to_string();
                 }
 
-                // 从屏保管线拉取一帧
+                // Pull from screensaver pipeline
                 match saver_appsink.pull_sample() {
                     Ok(sample) => {
-                        // 推送屏保帧到主管线，保持 V4L2 存活
+                        // Push screensaver frame to main pipeline
                         push_sample_to_appsrc(&mut s, sample, true);
                     }
                     Err(_) => {
-                        // 屏保管线如果挂了，我们也无能为力，但这通常不可能发生
+                        // Should not happen
                     }
                 }
             } else if elapsed > Duration::from_millis(200) {
-                // 状态：JITTER (网络抖动)
-                // 动作：补发上一帧 (Packet Loss Concealment)
+                // State: JITTER (Network Jitter)
+                // Action: PLC (Packet Loss Concealment - Repeat last frame)
                 if let Some(sample) = s.last_sample.clone() {
                     if s.active_codec != "none" {
                         push_sample_to_appsrc(&mut s, sample, true);
@@ -176,13 +177,27 @@ fn main() -> Result<()> {
         }
     });
 
-    // --- 4. 启动双路监听 ---
+    // --- 4. Start Listeners ---
+
+    // MJPEG Thread (Optional)
+    let mjpeg_url = args.mjpeg.clone();
+    let state_mjpeg = Arc::clone(&state);
+    let mjpeg_thread = if let Some(url) = mjpeg_url {
+        Some(thread::spawn(move || {
+            run_mjpeg_loop(&url, state_mjpeg);
+        }))
+    } else {
+        None
+    };
+
+    // H.264 Listener
     let state_h264 = Arc::clone(&state);
     let port_h264 = args.port_h264;
     let h264_thread = thread::spawn(move || {
         run_source_loop(port_h264, "h264", state_h264);
     });
 
+    // H.265 Listener
     let state_h265 = Arc::clone(&state);
     let port_h265 = args.port_h265;
     let h265_thread = thread::spawn(move || {
@@ -191,6 +206,9 @@ fn main() -> Result<()> {
 
     h264_thread.join().unwrap();
     h265_thread.join().unwrap();
+    if let Some(t) = mjpeg_thread {
+        t.join().unwrap();
+    }
 
     Ok(())
 }
@@ -199,7 +217,84 @@ fn check_plugin(name: &str) {
     let registry = gst::Registry::get();
     match registry.find_feature(name, gst::ElementFactory::static_type()) {
         Some(_) => println!("[CHECK] Plugin '{}' FOUND.", name),
-        None => println!("[CHECK] Plugin '{}' NOT FOUND! (H.265 might fail)", name),
+        None => println!(
+            "[CHECK] Plugin '{}' NOT FOUND! (Required for feature)",
+            name
+        ),
+    }
+}
+
+fn run_mjpeg_loop(url: &str, state: Arc<Mutex<BridgeState>>) {
+    println!("[THREAD] Starting MJPEG loop on URL: {}", url);
+
+    loop {
+        // Pipeline: curl/souphttpsrc -> multipartdemux -> jpegdec -> scale/convert -> appsink
+        // Using souphttpsrc for better HTTP support
+        let pipeline_str = format!(
+            "souphttpsrc location={} is-live=true do-timestamp=true keep-alive=true ! multipartdemux ! jpegdec ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
+            url
+        );
+
+        match gst::parse_launch(&pipeline_str) {
+            Ok(pipe) => {
+                println!("[NETWORK] MJPEG Listener CONNECTED to {}", url);
+                let appsink = pipe
+                    .downcast_ref::<gst::Bin>()
+                    .unwrap()
+                    .by_name("mysink")
+                    .unwrap()
+                    .downcast::<gst_app::AppSink>()
+                    .unwrap();
+
+                let state_input = Arc::clone(&state);
+                appsink.set_callbacks(
+                    gst_app::AppSinkCallbacks::builder()
+                        .new_sample(move |sink| {
+                            let sample = sink.pull_sample().map_err(|_| gst::FlowError::Error)?;
+                            let mut s = state_input.lock().unwrap();
+
+                            if s.active_codec != "mjpeg" {
+                                println!("[SWITCH] Codec changed: {} -> mjpeg", s.active_codec);
+                                s.active_codec = "mjpeg".to_string();
+                            }
+
+                            s.last_sample = Some(sample.clone());
+                            s.last_update = Instant::now();
+                            push_sample_to_appsrc(&mut s, sample, false);
+                            Ok(gst::FlowSuccess::Ok)
+                        })
+                        .build(),
+                );
+
+                if let Err(e) = pipe.set_state(gst::State::Playing) {
+                    println!("[GST-ERR] MJPEG set_state(Playing) failed: {}", e);
+                } else {
+                    let bus = pipe.bus().unwrap();
+                    for msg in bus.iter_timed(gst::ClockTime::NONE) {
+                        use gst::MessageView;
+                        match msg.view() {
+                            MessageView::Error(err) => {
+                                println!("[GST-ERR] MJPEG Pipeline Error: {}", err.error());
+                                break;
+                            }
+                            MessageView::Eos(..) => {
+                                println!("[GST-EOS] MJPEG EOS");
+                                break;
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                let _ = pipe.set_state(gst::State::Null);
+                println!("[NETWORK] MJPEG Listener DISCONNECTED (restarting...)");
+            }
+            Err(e) => {
+                println!("[GST-ERR] Failed to launch MJPEG pipeline: {}", e);
+            }
+        }
+
+        // Wait before reconnecting to avoid spamming
+        thread::sleep(Duration::from_secs(2));
     }
 }
 
@@ -212,7 +307,10 @@ fn run_source_loop(port: u16, codec: &str, state: Arc<Mutex<BridgeState>>) {
             "h265parse ! avdec_h265"
         };
 
-        // 强制 Scale + Convert 成 I420 1080p
+        // Use srtserversrc for listening mode? No, previous implementation used srtsrc with mode=listener.
+        // Wait, the previous implementation used srtsrc uri=srt://:port?mode=listener
+
+        // Force Scale + Convert to I420 1080p
         let src_pipeline_str = format!(
             "srtsrc uri=srt://:{}?mode=listener&latency=20&streamid=live&poll-timeout=100 ! tsdemux ! {} max-threads=4 ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1920,height=1080 ! appsink name=mysink sync=false drop=true max-buffers=1",
             port, parser_decoder
