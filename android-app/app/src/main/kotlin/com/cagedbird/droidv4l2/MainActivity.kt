@@ -274,9 +274,9 @@ class MainActivity : AppCompatActivity() {
 
         val (w, h) =
                 when (resStr) {
-                    "1080p" -> 1080 to 1920
-                    "480p" -> 480 to 640
-                    else -> 720 to 1280
+                    "1080p" -> 1920 to 1080
+                    "480p" -> 640 to 480
+                    else -> 1280 to 720
                 }
         val isHevc = (codecStr == "H.265")
 
