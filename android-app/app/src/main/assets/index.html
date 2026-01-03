@@ -3,71 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DroidV4L2 WebRTC</title>
+    <title>DroidV4L2 MJPEG Live</title>
     <style>
-        body { margin: 0; background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; color: #fff; font-family: sans-serif; }
-        video { width: 100%; max-width: 1280px; height: auto; background: #111; }
-        .status { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 4px; }
+        body { margin: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #fff; font-family: sans-serif; overflow: hidden; }
+        .container { position: relative; max-width: 100vw; max-height: 100vh; }
+        img { width: auto; height: auto; max-width: 100%; max-height: 100%; display: block; background: #111; }
+        .status { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #333; }
+        .badge { display: inline-block; width: 10px; height: 10px; background: #4CAF50; border-radius: 50%; margin-right: 6px; box-shadow: 0 0 10px #4CAF50; }
     </style>
 </head>
 <body>
-    <div class="status" id="status">Connecting...</div>
-    <video id="remoteVideo" autoplay playsinline controls></video>
+    <div class="status">
+        <span class="badge" id="badge"></span>
+        <span id="label">MJPEG: Connected</span>
+    </div>
+    <div class="container">
+        <img id="mjpeg" src="/stream" onerror="handleError()">
+    </div>
 
     <script>
-        const pc = new RTCPeerConnection();
-        const status = document.getElementById('status');
-        
-        pc.ontrack = (event) => {
-            const video = document.getElementById('remoteVideo');
-            if (event.streams && event.streams[0]) {
-                video.srcObject = event.streams[0];
-                status.innerText = "Connected";
-            }
-        };
+        const img = document.getElementById('mjpeg');
+        const label = document.getElementById('label');
+        const badge = document.getElementById('badge');
 
-        async function start() {
-            try {
-                // 1. Create Offer
-                pc.addTransceiver('video', { direction: 'recvonly' });
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-
-                // Wait for ICE gathering to complete (or 2s timeout) to ensure candidates are included
-                if (pc.iceGatheringState !== 'complete') {
-                    await new Promise(resolve => {
-                        const check = () => {
-                            if (pc.iceGatheringState === 'complete') {
-                                pc.removeEventListener('icegatheringstatechange', check);
-                                resolve();
-                            }
-                        };
-                        pc.addEventListener('icegatheringstatechange', check);
-                        setTimeout(() => {
-                           pc.removeEventListener('icegatheringstatechange', check);
-                           resolve();
-                        }, 2000);
-                    });
-                }
-
-                // 2. Send Offer to Server
-                const response = await fetch('/offer', {
-                    method: 'POST',
-                    body: JSON.stringify(pc.localDescription)
-                });
-                
-                if (!response.ok) throw new Error("Server error");
-                
-                const answer = await response.json();
-                await pc.setRemoteDescription(answer);
-
-            } catch (e) {
-                status.innerText = "Error: " + e.message;
-                console.error(e);
-            }
+        function handleError() {
+            label.innerText = "MJPEG: Disconnected (Retrying...)";
+            badge.style.background = "#ff5722";
+            badge.style.boxShadow = "none";
+            
+            // Reconnect logic
+            setTimeout(() => {
+                img.src = "/stream?t=" + new Date().getTime();
+                label.innerText = "MJPEG: Connecting...";
+            }, 3000);
         }
 
-        start();
+        img.onload = () => {
+            label.innerText = "MJPEG: Connected";
+            badge.style.background = "#4CAF50";
+            badge.style.boxShadow = "0 0 10px #4CAF50";
+        };
     </script>
 </body>
 </html>
