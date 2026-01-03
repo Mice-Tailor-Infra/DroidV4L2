@@ -25,14 +25,28 @@
             android:textColor="#00FF00"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/editIp"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Target IP"
-            android:text="10.0.0.17"
-            android:textColor="#FFF"
-            android:textColorHint="#888" />
+            android:orientation="horizontal">
+            <EditText
+                android:id="@+id/editIp"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:hint="Target IP"
+                android:text="10.0.0.17"
+                android:textColor="#FFF"
+                android:textColorHint="#888" />
+            <Button
+                android:id="@+id/btnAutoFind"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔍 Auto"
+                android:textSize="12sp"
+                android:backgroundTint="#444"
+                android:textColor="#FFF"/>
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"

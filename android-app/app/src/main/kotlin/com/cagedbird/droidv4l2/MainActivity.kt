@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -39,6 +42,13 @@ class MainActivity : AppCompatActivity() {
 
     private var viewFinder: PreviewView? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // NsdManager
+    private var nsdManager: NsdManager? = null
+    private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
+    private val SERVICE_TYPE = "_droidv4l2._tcp."
+    private var isDiscovering = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +101,98 @@ class MainActivity : AppCompatActivity() {
 
             Log.i(TAG, "[UI] Applying settings...")
             restartStreamingWithDelay()
+        }
+
+        findViewById<Button>(R.id.btnAutoFind).setOnClickListener { startDiscovery(editIp) }
+    }
+
+    private fun startDiscovery(editIp: EditText) {
+        if (isDiscovering) return
+        isDiscovering = true
+        findViewById<Button>(R.id.btnAutoFind).text = "Searching..."
+
+        // Acquire Multicast Lock
+        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        multicastLock =
+                wifi.createMulticastLock("multicastLock").apply {
+                    setReferenceCounted(true)
+                    acquire()
+                }
+
+        nsdManager = (getSystemService(Context.NSD_SERVICE) as NsdManager)
+
+        discoveryListener =
+                object : NsdManager.DiscoveryListener {
+                    override fun onDiscoveryStarted(regType: String) {
+                        Log.d(TAG, "Service discovery started")
+                    }
+
+                    override fun onServiceFound(service: NsdServiceInfo) {
+                        Log.d(TAG, "Service discovery found ${service}")
+                        if (service.serviceType.contains("_droidv4l2")) {
+                            nsdManager?.resolveService(
+                                    service,
+                                    object : NsdManager.ResolveListener {
+                                        override fun onResolveFailed(
+                                                serviceInfo: NsdServiceInfo,
+                                                errorCode: Int
+                                        ) {
+                                            Log.e(TAG, "Resolve failed: $errorCode")
+                                        }
+                                        override fun onServiceResolved(
+                                                serviceInfo: NsdServiceInfo
+                                        ) {
+                                            Log.i(TAG, "Resolve Succeeded. ${serviceInfo}")
+                                            val host = serviceInfo.host
+                                            runOnUiThread {
+                                                editIp.setText(host.hostAddress)
+                                                findViewById<Button>(R.id.btnAutoFind).text =
+                                                        "Found!"
+                                                mainHandler.postDelayed(
+                                                        {
+                                                            findViewById<Button>(R.id.btnAutoFind)
+                                                                    .text = "🔍 Auto"
+                                                        },
+                                                        2000
+                                                )
+                                                stopDiscovery()
+                                            }
+                                        }
+                                    }
+                            )
+                        }
+                    }
+
+                    override fun onServiceLost(service: NsdServiceInfo) {
+                        Log.e(TAG, "service lost: $service")
+                    }
+
+                    override fun onDiscoveryStopped(serviceType: String) {
+                        Log.i(TAG, "Discovery stopped: $serviceType")
+                        isDiscovering = false
+                        multicastLock?.release()
+                    }
+
+                    override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                        Log.e(TAG, "Discovery failed: Error code:$errorCode")
+                        nsdManager?.stopServiceDiscovery(this)
+                    }
+
+                    override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                        Log.e(TAG, "Discovery failed: Error code:$errorCode")
+                        nsdManager?.stopServiceDiscovery(this)
+                    }
+                }
+
+        nsdManager?.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+    }
+
+    private fun stopDiscovery() {
+        if (!isDiscovering) return
+        try {
+            nsdManager?.stopServiceDiscovery(discoveryListener)
+        } catch (e: Exception) {
+            Log.e(TAG, "Stop discovery failed", e)
         }
     }
 
