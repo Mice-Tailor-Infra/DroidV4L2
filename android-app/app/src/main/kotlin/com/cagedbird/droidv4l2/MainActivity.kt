@@ -93,6 +93,31 @@ class MainActivity : AppCompatActivity() {
                 protocolOptions.indexOf(prefs.getString("protocol", "SRT (Caller)"))
         )
 
+        spinnerProtocol.onItemSelectedListener =
+                object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(
+                            parent: AdapterView<*>?,
+                            view: android.view.View?,
+                            position: Int,
+                            id: Long
+                    ) {
+                        val protocol = protocolOptions[position]
+                        val isSoftwareMode = protocol == "WebRTC" || protocol == "MJPEG (HTTP)"
+
+                        spinnerCodec.isEnabled = !isSoftwareMode
+                        editBitrate.isEnabled = !isSoftwareMode
+
+                        if (isSoftwareMode) {
+                            spinnerCodec.alpha = 0.5f
+                            editBitrate.alpha = 0.5f
+                        } else {
+                            spinnerCodec.alpha = 1.0f
+                            editBitrate.alpha = 1.0f
+                        }
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+
         editIp.setText(prefs.getString("ip", "10.0.0.17"))
         editBitrate.setText(prefs.getInt("bitrate", 10).toString())
 
