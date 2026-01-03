@@ -58,18 +58,9 @@ class WebServer(
 
             Thread {
                         try {
-                            val boundary = "--BoundaryString"
-                            pipedOutputStream.write(
-                                    ("HTTP/1.0 200 OK\r\n" +
-                                                    "Server: DroidV4L2\r\n" +
-                                                    "Connection: close\r\n" +
-                                                    "Max-Age: 0\r\n" +
-                                                    "Expires: 0\r\n" +
-                                                    "Cache-Control: no-cache, private\r\n" +
-                                                    "Pragma: no-cache\r\n" +
-                                                    "Content-Type: multipart/x-mixed-replace; boundary=$boundary\r\n\r\n")
-                                            .toByteArray()
-                            )
+                            val boundary = "DroidV4L2Boundary"
+                            // Note: NanoHTTPD handles the Status Line and Main Headers.
+                            // We only write the Multipart Body.
 
                             while (true) {
                                 var jpeg: ByteArray?
@@ -79,7 +70,9 @@ class WebServer(
                                 }
 
                                 if (jpeg != null) {
-                                    pipedOutputStream.write((boundary + "\r\n").toByteArray())
+                                    // Write Boundary
+                                    pipedOutputStream.write(("--$boundary\r\n").toByteArray())
+                                    // Write Part Headers
                                     pipedOutputStream.write(
                                             ("Content-Type: image/jpeg\r\n" +
                                                             "Content-Length: " +
@@ -87,7 +80,9 @@ class WebServer(
                                                             "\r\n\r\n")
                                                     .toByteArray()
                                     )
+                                    // Write Image Data
                                     pipedOutputStream.write(jpeg)
+                                    // Write End of Part
                                     pipedOutputStream.write("\r\n".toByteArray())
                                     pipedOutputStream.flush()
                                 }
@@ -98,11 +93,21 @@ class WebServer(
                     }
                     .start()
 
-            newChunkedResponse(
-                    Response.Status.OK,
-                    "multipart/x-mixed-replace; boundary=--BoundaryString",
-                    pipedInputStream
-            )
+            val response =
+                    newChunkedResponse(
+                            Response.Status.OK,
+                            "multipart/x-mixed-replace; boundary=DroidV4L2Boundary",
+                            pipedInputStream
+                    )
+            response.addHeader("Connection", "close")
+            response.addHeader("Max-Age", "0")
+            response.addHeader("Expires", "0")
+            response.addHeader("Cache-Control", "no-cache, private")
+            response.addHeader("Pragma", "no-cache")
+            // Allow cross-origin for testing if needed
+            response.addHeader("Access-Control-Allow-Origin", "*")
+
+            response
         } catch (e: IOException) {
             newFixedLengthResponse(
                     Response.Status.INTERNAL_ERROR,
