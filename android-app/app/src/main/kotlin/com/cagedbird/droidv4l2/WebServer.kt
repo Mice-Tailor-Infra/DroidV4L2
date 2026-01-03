@@ -5,8 +5,15 @@ import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
 
-class WebServer(private val context: Context, port: Int, private val webRtcManager: WebRtcManager) :
-        NanoHTTPD(port) {
+class WebServer(
+        private val context: Context,
+        port: Int,
+        private var webRtcManager: WebRtcManager?
+) : NanoHTTPD(port) {
+
+    fun setWebRtcManager(manager: WebRtcManager) {
+        this.webRtcManager = manager
+    }
 
     private val TAG = "WebServer"
 
@@ -132,7 +139,7 @@ class WebServer(private val context: Context, port: Int, private val webRtcManag
                                 "Missing body"
                         )
 
-        val answer = webRtcManager.handleOffer(json)
+        val answer = webRtcManager?.handleOffer(json)
 
         return if (answer != null) {
             newFixedLengthResponse(Response.Status.OK, "application/json", answer)

@@ -77,9 +77,8 @@ class StreamingService : LifecycleService() {
         super.onCreate()
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        // Initialize WebRTC
-        webRtcManager = WebRtcManager(this)
-        webServer = WebServer(this, 8080, webRtcManager!!)
+        // WebServer starts immediately, but WebRTC manager is lazy loaded
+        webServer = WebServer(this, 8080, null)
         createNotificationChannel()
     }
 
@@ -240,6 +239,17 @@ class StreamingService : LifecycleService() {
 
                     imageAnalysis.setAnalyzer(cameraExecutor) { image ->
                         if (config.protocol == "WebRTC") {
+                            // Lazy Init WebRTC
+                            if (webRtcManager == null) {
+                                try {
+                                    Log.i(TAG, "Initializing WebRTC Manager...")
+                                    webRtcManager = WebRtcManager(this@StreamingService)
+                                    webServer?.setWebRtcManager(webRtcManager!!)
+                                } catch (e: Throwable) {
+                                    Log.e(TAG, "Failed to initialize WebRTC", e)
+                                    // Fallback or error?
+                                }
+                            }
                             webRtcManager?.onFrame(image)
                         } else if (config.protocol == "MJPEG (HTTP)") {
                             // MJPEG Handling

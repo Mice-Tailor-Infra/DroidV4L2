@@ -80,7 +80,13 @@ class MainActivity : AppCompatActivity() {
         spinnerCodec.setSelection(codecOptions.indexOf(prefs.getString("codec", "H.264")))
 
         val protocolOptions =
-                arrayOf("SRT (Caller)", "RTSP (Server)", "Broadcast (SRT + RTSP)", "WebRTC")
+                arrayOf(
+                        "SRT (Caller)",
+                        "RTSP (Server)",
+                        "Broadcast (SRT + RTSP)",
+                        "WebRTC",
+                        "MJPEG (HTTP)"
+                )
         spinnerProtocol.adapter =
                 ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolOptions)
         spinnerProtocol.setSelection(
